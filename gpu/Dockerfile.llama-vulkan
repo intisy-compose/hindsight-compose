@@ -1,0 +1,56 @@
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ninja-build pkg-config git ca-certificates python3-pip \
+      python3-mako python3-ply python3-yaml python3-setuptools python3-packaging \
+      bison flex libdrm-dev directx-headers-dev \
+      libvulkan-dev libexpat1-dev zlib1g-dev libelf-dev cmake glslc \
+      spirv-headers spirv-tools libcurl4-openssl-dev wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --break-system-packages -q -U meson
+
+ARG MESA_TAG=mesa-25.2.8
+RUN git clone --depth 1 --branch ${MESA_TAG} \
+      https://gitlab.freedesktop.org/mesa/mesa.git /src/mesa
+WORKDIR /src/mesa
+RUN meson setup build \
+      --prefix=/opt/dzn -Dbuildtype=release \
+      -Dvulkan-drivers=microsoft-experimental \
+      -Dgallium-drivers= -Dplatforms= -Dglx=disabled -Degl=disabled \
+      -Dgles1=disabled -Dgles2=disabled -Dopengl=false -Dgbm=disabled \
+      -Dvideo-codecs= -Dllvm=disabled -Dmicrosoft-clc=disabled -Dvulkan-layers= \
+    && ninja -C build -j"$(nproc)" \
+    && ninja -C build install
+
+ARG LLAMA_REF=master
+RUN git clone --depth 1 --branch ${LLAMA_REF} \
+      https://github.com/ggml-org/llama.cpp /src/llama.cpp
+WORKDIR /src/llama.cpp
+RUN cmake -B build -DGGML_VULKAN=ON -DLLAMA_CURL=ON -DGGML_NATIVE=ON \
+          -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON \
+    && cmake --build build --config Release -j"$(nproc)" --target llama-server
+
+FROM ubuntu:24.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libvulkan1 libdrm2 libexpat1 libelf1 libgomp1 libcurl4 \
+      ca-certificates wget vulkan-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/dzn /opt/dzn
+COPY --from=builder /src/llama.cpp/build/bin/ /opt/llama/bin/
+
+ENV VK_ICD_FILENAMES=/opt/dzn/share/vulkan/icd.d/dzn_icd.x86_64.json \
+    LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/dzn/lib/x86_64-linux-gnu:/opt/llama/bin \
+    LD_PRELOAD= \
+    MODEL_DIR=/models \
+    GPU_BACKEND=vulkan
+
+COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+EXPOSE 11434
+ENTRYPOINT ["/entrypoint.sh"]

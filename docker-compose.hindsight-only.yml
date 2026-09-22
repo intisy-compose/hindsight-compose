@@ -1,0 +1,28 @@
+# Native mode: llama-server.exe runs on the Windows host (fastest on AMD via native Vulkan).
+# Inherits hindsight + backups from the shared base; only the llama healthcheck stub and the
+# host-pointing LLM URL differ. NOTE: native llama-server.exe does NOT auto-start on reboot —
+# use a container mode (docker-compose.nvidia.yml / .gpu.yml) if you want auto-start.
+include:
+  - docker-compose.base.yml
+
+services:
+  # Stub container whose health mirrors the real llama-server.exe running on the host, so
+  # hindsight's depends_on/health view is consistent with the container modes.
+  llama:
+    image: alpine:latest
+    container_name: llama
+    restart: unless-stopped
+    command: ["tail", "-f", "/dev/null"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://host.docker.internal:${LLAMA_PORT:-11434}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # Native llama runs on the host, so point hindsight at it instead of the in-stack container.
+  hindsight:
+    environment:
+      HINDSIGHT_API_LLM_BASE_URL: http://host.docker.internal:${LLAMA_PORT:-11434}/v1

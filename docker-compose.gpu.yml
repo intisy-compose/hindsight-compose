@@ -1,0 +1,39 @@
+# AMD (Vulkan via Dozen/WSL2) llama in a container. Inherits hindsight + backups from the
+# shared base, so settings/backups stay identical across all modes. Auto-starts on reboot.
+include:
+  - docker-compose.base.yml
+
+services:
+  llama:
+    build:
+      context: ./gpu
+      dockerfile: Dockerfile.llama-vulkan
+    image: llama-vulkan-dozen:latest
+    container_name: llama
+    restart: unless-stopped
+    devices:
+      - "/dev/dxg:/dev/dxg"
+    volumes:
+      - "/usr/lib/wsl:/usr/lib/wsl:ro"
+      - "./data/llama:/models"
+    environment:
+      MODEL_ALIAS: "${MODEL_ALIAS:-qwen2.5:7b}"
+      NGL: "${LLAMA_NGL:-99}"
+      CTX: "${LLAMA_CTX:-8192}"
+      PORT: "${LLAMA_PORT:-11434}"
+      GPU_BACKEND: "vulkan"
+    command: ["--parallel", "1", "--threads-http", "2", "--ubatch-size", "${LLAMA_UBATCH_SIZE:-256}", "--flash-attn", "on"]
+    ports:
+      - "${LLAMA_PORT:-11434}:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:11434/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 900s
+
+  # Wait for llama to be ready before hindsight starts (the rest of hindsight comes from base).
+  hindsight:
+    depends_on:
+      llama:
+        condition: service_healthy

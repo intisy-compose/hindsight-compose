@@ -1,0 +1,16 @@
+# Local config (copy from config.env.example)
+config.env
+
+# Runtime data: postgres store, hindsight memory, model files, backups (large)
+data/
+
+# Saved docker image tarballs
+images/
+
+# Downloaded llama.cpp Windows runtime (DLLs + executables)
+llama-win/
+
+# Caches / logs
+__pycache__/
+*.pyc
+*.log

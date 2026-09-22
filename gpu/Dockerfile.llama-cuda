@@ -1,0 +1,40 @@
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git ca-certificates libcurl4-openssl-dev wget \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG LLAMA_REF=master
+# CUDA target arch(s). Default 86 = RTX 3060 (Ampere, compute 8.6); a single arch builds
+# ~5x faster than the full set. Widen for other GPUs, e.g.
+#   docker compose build --build-arg CUDA_ARCHS="75;80;86;89;90" llama
+ARG CUDA_ARCHS=86
+RUN git clone --depth 1 --branch ${LLAMA_REF} \
+      https://github.com/ggml-org/llama.cpp /src/llama.cpp
+WORKDIR /src/llama.cpp
+RUN cmake -B build \
+      -DGGML_CUDA=ON \
+      -DLLAMA_CURL=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLAMA_BUILD_SERVER=ON \
+      -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
+    && cmake --build build --config Release -j"$(nproc)" --target llama-server
+
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libcurl4 ca-certificates wget libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/llama.cpp/build/bin/ /opt/llama/bin/
+
+ENV MODEL_DIR=/models \
+    GPU_BACKEND=cuda
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 11434
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,127 @@
+# Shared base for ALL llama modes (native / CUDA / Vulkan). Defines the hindsight API service
+# and the automatic-backup sidecar ONCE, so settings + backups never drift between variants.
+# Each docker-compose.<variant>.yml `include`s this and only adds its own `llama` service
+# (native mode additionally overrides HINDSIGHT_API_LLM_BASE_URL to host.docker.internal).
+services:
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest
+    container_name: hindsight
+    restart: unless-stopped
+    # pg0 runs inside this container and needs shared memory for parallel index builds /
+    # large restores. Docker's 64MB /dev/shm default caused "could not resize shared memory
+    # segment ... No space left on device" during a 1.4GB restore. 2GB is ample headroom.
+    shm_size: "2gb"
+    extra_hosts:
+      # Harmless in container modes; required in native mode (llama-server.exe on the host).
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8888:8888"
+      - "9999:9999"
+    environment:
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_MODEL: ${MODEL_ALIAS:-qwen2.5:7b}
+      HINDSIGHT_API_LLM_API_KEY: none
+      # Default targets the in-stack llama container; native mode overrides this.
+      HINDSIGHT_API_LLM_BASE_URL: http://llama:11434/v1
+      HINDSIGHT_API_LLM_TIMEOUT: "1800"
+      HINDSIGHT_API_LLM_TRACE_ENABLED: "true"
+      HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
+      HINDSIGHT_API_SKIP_LLM_VERIFICATION: "true"
+      # Headroom for startup init. Two separate 300s defaults can kill init mid-operation
+      # (e.g. a one-time vector index build on a large DB), causing a restart loop — raise both
+      # so a heavy-but-finite init can run to completion.
+      HINDSIGHT_API_MODEL_INIT_TIMEOUT: "1800"
+      HINDSIGHT_API_STARTUP_WAIT_SECONDS: "1800"
+      # 2 worker slots: one reserved for consolidation (below), one shared lane for live retains.
+      HINDSIGHT_API_WORKER_MAX_SLOTS: "2"
+      HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLOTS: "${HINDSIGHT_CONSOLIDATION_SLOTS:-1}"
+      # 2 facts/consolidation call keeps prompts ~9k tokens, under the 32768 window (avoids HTTP 400).
+      HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE: "2"
+    volumes:
+      - "hindsight-pg0:/home/hindsight/.pg0"
+
+  # Automatic backups: a pg_dump CLIENT (not a second Postgres server) on a 15-min loop.
+  # Shares hindsight's network namespace to reach the embedded pg0 on 127.0.0.1:5432, and
+  # writes logical SQL dumps to ./data/hindsight on the Windows host (survives a Docker reinstall).
+  db-backup:
+    image: postgres:18-alpine
+    container_name: hindsight-db-backup
+    restart: unless-stopped
+    depends_on:
+      - hindsight
+    network_mode: "service:hindsight"
+    environment:
+      PGPASSWORD: hindsight
+    tmpfs:
+      # postgres image declares VOLUME /var/lib/postgresql; this sidecar only runs pg_dump,
+      # so map it to ephemeral tmpfs to stop Docker creating an empty anonymous volume.
+      - /var/lib/postgresql
+    volumes:
+      - "./data/hindsight:/backups"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        log() { echo "$$(date '+%Y-%m-%d %H:%M:%S') $$1" >> /backups/backup.log; }
+        # Tiered (GFS) retention: keep newest 4, then 1/hour (<1d), 1/day (<1wk),
+        # 1/week (<4wk), 1/month (>=4wk). Keeps the newest backup in each period.
+        prune() {
+          now=$$(date +%s); i=0; seen=" "
+          for f in $$(ls -1 /backups/hindsight-*.sql 2>/dev/null | sort -r); do
+            i=$$((i+1)); [ "$$i" -le 4 ] && continue
+            b=$$(basename "$$f" .sql); ts=$${b#hindsight-}
+            ymd=$${ts%-*}; hms=$${ts#*-}; hh=$${hms%????}
+            fe=$$(date -D "%Y%m%d-%H%M%S" -d "$$ts" +%s 2>/dev/null); [ -z "$$fe" ] && continue
+            age=$$((now - fe))
+            if   [ "$$age" -lt 86400 ];   then key="H$$ymd$$hh"
+            elif [ "$$age" -lt 604800 ];  then key="D$$ymd"
+            elif [ "$$age" -lt 2419200 ]; then key="W$$((fe/604800))"
+            else key="M$$((fe/2419200))"; fi
+            case "$$seen" in *" $$key "*) log "deleted $$(basename "$$f")"; rm -f "$$f" ;; *) seen="$$seen$$key " ;; esac
+          done
+        }
+        # Self-heal stuck ops: a container restart leaves in-flight ops marked 'processing'
+        # under the old (now-dead) worker id; nothing reclaims them and they wedge the worker
+        # slot. Reset anything stuck in 'processing' with no update for >45 min back to pending.
+        reap() {
+          n=$$(psql -h 127.0.0.1 -U hindsight -d hindsight -tAc "WITH r AS (UPDATE async_operations SET status='pending', worker_id=NULL, claimed_at=NULL WHERE status='processing' AND updated_at < now() - interval '45 minutes' RETURNING 1) SELECT count(*) FROM r" 2>/dev/null)
+          [ -n "$$n" ] && [ "$$n" != "0" ] && log "reaped $$n stuck processing op(s) -> pending"
+          return 0
+        }
+        # Self-heal: if the DB came up empty (e.g. volume deleted / Docker reinstalled) and a
+        # backup exists, restore the newest one automatically - no manual restore step needed.
+        restore_if_empty() {
+          until pg_isready -h 127.0.0.1 -U hindsight -d hindsight >/dev/null 2>&1; do sleep 2; done
+          cnt=""; n=0
+          while [ "$$n" -lt 60 ]; do
+            cnt=$$(psql -h 127.0.0.1 -U hindsight -d hindsight -tAc "SELECT count(*) FROM memory_units" 2>/dev/null) && break
+            n=$$((n+1)); sleep 3
+          done
+          latest=$$(ls -1t /backups/hindsight-*.sql 2>/dev/null | head -1)
+          if [ "$$cnt" = "0" ] && [ -n "$$latest" ]; then
+            echo "[restore] empty DB + backup present -> restoring $$latest"
+            psql -h 127.0.0.1 -U hindsight -d hindsight -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='hindsight' AND pid <> pg_backend_pid()" >/dev/null 2>&1
+            psql -h 127.0.0.1 -U hindsight -d hindsight --single-transaction -f "$$latest" > /backups/last-restore.log 2>&1
+            psql -h 127.0.0.1 -U hindsight -d hindsight -c "UPDATE async_operations SET status='pending', worker_id=NULL, claimed_at=NULL WHERE status='processing' AND task_payload IS NOT NULL" >> /backups/last-restore.log 2>&1
+            echo "[restore] complete"
+          fi
+        }
+        restore_if_empty
+        reap
+        while true; do
+          # Align to the next wall-clock quarter-hour (:00 :15 :30 :45) instead of drifting.
+          now=$$(date +%s); sleep $$(( 900 - (now % 900) ))
+          ts=$$(date +%Y%m%d-%H%M%S)
+          if pg_dump -h 127.0.0.1 -U hindsight -d hindsight --no-owner --clean --if-exists > /backups/hindsight-$$ts.sql.tmp 2> /backups/last-error.log; then
+            mv /backups/hindsight-$$ts.sql.tmp /backups/hindsight-$$ts.sql
+            log "created hindsight-$$ts.sql"
+          else
+            rm -f /backups/hindsight-$$ts.sql.tmp
+            log "FAILED hindsight-$$ts.sql"
+          fi
+          prune
+          reap
+        done
+
+volumes:
+  hindsight-pg0:
