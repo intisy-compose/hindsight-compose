@@ -66,6 +66,10 @@ services:
         # Tiered (GFS) retention: keep newest 4, then 1/hour (<1d), 1/day (<1wk),
         # 1/week (<4wk), 1/month (>=4wk). Keeps the newest backup in each period.
         prune() {
+          # A dump killed mid-write (container stop) leaves its .tmp behind, and nothing else removes it.
+          for f in /backups/hindsight-*.sql.tmp; do
+            [ -e "$$f" ] && log "deleted stale $$(basename "$$f")" && rm -f "$$f"
+          done
           now=$$(date +%s); i=0; seen=" "
           for f in $$(ls -1 /backups/hindsight-*.sql 2>/dev/null | sort -r); do
             i=$$((i+1)); [ "$$i" -le 4 ] && continue
@@ -107,6 +111,7 @@ services:
           fi
         }
         restore_if_empty
+        prune
         reap
         while true; do
           # Align to the next wall-clock quarter-hour (:00 :15 :30 :45) instead of drifting.
