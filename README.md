@@ -27,7 +27,7 @@ Requires [Docker](https://docs.docker.com/get-docker/). For GPU modes, a working
 WSL2 GPU setup or the NVIDIA container toolkit.
 
 ```powershell
-git clone https://github.com/intisy-compose/hindsight-compose
+git clone --recursive https://github.com/intisy-compose/hindsight-compose
 cd hindsight-compose
 cp config.env.example config.env   # model, GPU backend, ports, context size
 
@@ -50,9 +50,11 @@ docker compose -f docker-compose.gpu.yml up -d
 Maintenance runs through the same CLI: `consolidate`, `reingest`, `restore` and `save-images`.
 Their implementations live in `scripts/`, which is not meant to be run directly.
 
-Model weights, the Postgres volume and llama binaries are large and live under
-`data/`, `images/` and `llama-win/`, all gitignored - they are downloaded or
-built on first run, never committed.
+`data/` is its own git repo (a submodule), defaulting to the public
+[`hindsight-data-template`](https://github.com/intisy-compose/hindsight-data-template). Point it at
+your own with `.\docker-compose.ps1 data use <owner/repo[@ref]>`. The dumps and model weights inside
+it are gitignored there, and `images/` and `llama-win/` are gitignored here: all of them are
+downloaded or built on first run, never committed.
 
 ## License
 
