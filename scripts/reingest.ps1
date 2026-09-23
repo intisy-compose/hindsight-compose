@@ -12,8 +12,8 @@
 .PARAMETER Limit  Only process the newest N transcripts (0 = all).
 .PARAMETER MinKB  Skip transcripts smaller than this (default 50 KB; skips tiny agent logs).
 .EXAMPLE
-    .\scripts\reingest.ps1 -Limit 1   # smoke-test on the newest transcript
-    .\scripts\reingest.ps1            # rebuild from all transcripts
+    .\docker-compose.ps1 reingest -Limit 1   # smoke-test on the newest transcript
+    .\docker-compose.ps1 reingest            # rebuild from all transcripts
 #>
 param([int]$Limit = 0, [int]$MinKB = 50)
 
