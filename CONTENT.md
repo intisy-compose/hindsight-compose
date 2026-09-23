@@ -27,11 +27,11 @@ git clone https://github.com/intisy-compose/hindsight-compose
 cd hindsight-compose
 cp config.env.example config.env   # model, GPU backend, ports, context size
 
-# Windows launcher (start | stop | logs)
-./docker-compose.ps1 start
+# Launcher (start | stop | logs): docker-compose.ps1 or .bat on Windows, .sh elsewhere
+./docker-compose.sh start
 
-# Or compose directly, choosing a backend overlay:
-docker compose -f docker-compose.base.yml -f docker-compose.gpu.yml up -d
+# Or compose directly, choosing a backend overlay (each one includes the base):
+docker compose -f docker-compose.gpu.yml up -d
 ```
 
 ## Configuration
@@ -40,6 +40,10 @@ docker compose -f docker-compose.base.yml -f docker-compose.gpu.yml up -d
 (`MODEL_FILE`, `MODEL_URL`, `MODEL_ALIAS`), GPU backend (`DOCKER_LLAMA`,
 `GPU_TYPE`), ports (`LLAMA_PORT`) and llama.cpp tuning (`LLAMA_CTX`, `LLAMA_NGL`,
 `LLAMA_KV_CACHE_TYPE`, ...). Defaults suit a 12 GB GPU.
+
+`DOCKER_LLAMA=false` runs a native Windows llama-server through `docker-compose.ps1`; the `.sh`
+launcher has no native path and instead starts `docker-compose.hindsight-only.yml` against an LLM
+you run on the host.
 
 Model weights, the Postgres volume and llama binaries are large and live under
 `data/`, `images/` and `llama-win/`, all gitignored - they are downloaded or
