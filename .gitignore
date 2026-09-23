@@ -1,9 +1,6 @@
 # Local config and secrets (copy config.env from config.env.example)
 config.env
 
-# Runtime data: postgres store, hindsight memory, model files, backups (large)
-data/
-
 # Saved docker image tarballs
 images/
 
