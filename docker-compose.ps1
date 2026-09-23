@@ -45,9 +45,9 @@ function Invoke-Data([object[]]$DataArguments) {
                 $ref = "main"
             }
             Write-Host "Pointing data at $url @ $ref" -ForegroundColor Cyan
+            if (-not (Test-Path "$PSScriptRoot\data\.git")) { git -C $PSScriptRoot submodule update --init -- data 2>$null | Out-Null }
             git -C $PSScriptRoot config submodule.data.url $url
-            git -C $PSScriptRoot submodule sync -- data | Out-Null
-            git -C $PSScriptRoot submodule update --init -- data 2>$null | Out-Null
+            git -C "$PSScriptRoot\data" remote set-url origin $url
             git -C "$PSScriptRoot\data" fetch -q origin $ref
             git -C "$PSScriptRoot\data" checkout -q FETCH_HEAD
             Write-Host "  data now at $(git -C "$PSScriptRoot\data" rev-parse --short HEAD)" -ForegroundColor Green
