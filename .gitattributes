@@ -1,2 +1,3 @@
-# Normalize to LF; PowerShell, Python and shell scripts are fine with LF.
+# LF everywhere so shell inlined in compose files survives a Windows clone; cmd needs CRLF.
 * text=auto eol=lf
+*.bat text eol=crlf

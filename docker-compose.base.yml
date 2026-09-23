@@ -28,7 +28,7 @@ services:
       HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
       HINDSIGHT_API_SKIP_LLM_VERIFICATION: "true"
       # Headroom for startup init. Two separate 300s defaults can kill init mid-operation
-      # (e.g. a one-time vector index build on a large DB), causing a restart loop — raise both
+      # (e.g. a one-time vector index build on a large DB), causing a restart loop - raise both
       # so a heavy-but-finite init can run to completion.
       HINDSIGHT_API_MODEL_INIT_TIMEOUT: "1800"
       HINDSIGHT_API_STARTUP_WAIT_SECONDS: "1800"

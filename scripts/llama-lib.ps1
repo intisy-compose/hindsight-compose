@@ -63,7 +63,7 @@ function Stop-NativeLlamaAndProxy {
 
 # Start llama-server.exe (on InternalPort) and the JSON-repair proxy (on ListenPort).
 # With -SkipIfRunning, returns $null without touching anything if llama-server is
-# already alive — so reacting to a duplicate docker 'start' event won't kill a live server.
+# already alive - so reacting to a duplicate docker 'start' event won't kill a live server.
 # Otherwise clears any stale processes, starts both, writes PID files, and returns
 # an object with the .Llama and .Proxy process handles.
 function Start-NativeLlamaAndProxy {
