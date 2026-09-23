@@ -13,8 +13,8 @@
 .PARAMETER PollSeconds
     How often to poll operation counts (default 30s).
 .EXAMPLE
-    .\scripts\consolidate.ps1                 # wait for retains, then consolidate fully
-    .\scripts\consolidate.ps1 -RunImmediately # consolidate now regardless of retain queue
+    .\docker-compose.ps1 consolidate                 # wait for retains, then consolidate fully
+    .\docker-compose.ps1 consolidate -RunImmediately # consolidate now regardless of retain queue
 #>
 param(
     [switch]$RunImmediately,

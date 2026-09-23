@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Restore the Hindsight database from a host-side SQL dump created by backup.ps1.
+    Restore the Hindsight database from a host-side SQL dump written by the db-backup sidecar.
     Use after a Docker reinstall (or any data loss) to recover the memory bank.
 
 .PARAMETER File  Path to a specific .sql dump. Defaults to the newest in backups\.
 .EXAMPLE
-    .\scripts\restore.ps1            # restore the newest backup
-    .\scripts\restore.ps1 -File ...  # restore a specific dump
+    .\docker-compose.ps1 restore            # restore the newest backup
+    .\docker-compose.ps1 restore -File ...  # restore a specific dump
 #>
 param([string]$File)
 
