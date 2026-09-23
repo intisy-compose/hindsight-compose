@@ -1,9 +1,6 @@
 # hindsight-compose
 
-A Docker stack for running [hindsight](https://github.com/vectorize-io/hindsight)
-(an agent long-term-memory service) backed by a **local llama.cpp** LLM, with
-PostgreSQL storage and automatic backups. GPU acceleration is optional and comes
-in interchangeable overlays.
+A Docker stack for running [hindsight](https://github.com/vectorize-io/hindsight) (an agent long-term-memory service) backed by a **local llama.cpp** LLM, with PostgreSQL storage and automatic backups. GPU acceleration is optional and comes in interchangeable overlays.
 
 ## Stack
 
@@ -49,9 +46,9 @@ docker compose -f docker-compose.base.yml -f docker-compose.gpu.yml up -d
 `LLAMA_KV_CACHE_TYPE`, ...). Defaults suit a 12 GB GPU.
 
 Model weights, the Postgres volume and llama binaries are large and live under
-`data/`, `images/` and `llama-win/`, all gitignored — they are downloaded or
+`data/`, `images/` and `llama-win/`, all gitignored - they are downloaded or
 built on first run, never committed.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
