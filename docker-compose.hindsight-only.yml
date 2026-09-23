@@ -1,6 +1,6 @@
 # Native mode: llama-server.exe runs on the Windows host (fastest on AMD via native Vulkan).
 # Inherits hindsight + backups from the shared base; only the llama healthcheck stub and the
-# host-pointing LLM URL differ. NOTE: native llama-server.exe does NOT auto-start on reboot —
+# host-pointing LLM URL differ. NOTE: native llama-server.exe does NOT auto-start on reboot -
 # use a container mode (docker-compose.nvidia.yml / .gpu.yml) if you want auto-start.
 include:
   - docker-compose.base.yml

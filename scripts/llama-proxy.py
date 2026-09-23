@@ -16,7 +16,7 @@ try:
     HAS_REPAIR = True
 except ImportError:
     HAS_REPAIR = False
-    sys.stderr.write("WARNING: json-repair not installed — falling back to regex fix\n")
+    sys.stderr.write("WARNING: json-repair not installed - falling back to regex fix\n")
     sys.stderr.flush()
 
 LISTEN_PORT   = int(sys.argv[1]) if len(sys.argv) > 1 else 11434
@@ -92,7 +92,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                     try:
                         data = json.loads(body_str)
                     except json.JSONDecodeError as e:
-                        log_err(f"Outer JSON parse failed: {e} — applying escape fix")
+                        log_err(f"Outer JSON parse failed: {e} - applying escape fix")
                         body_str = INVALID_ESC_RE.sub(r'\\\\', body_str)
                         data = json.loads(body_str)
                     for choice in data.get('choices', []):
@@ -117,7 +117,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(resp_body)
 
         except _CONNECTION_ERRORS:
-            pass  # client disconnected mid-response — harmless
+            pass  # client disconnected mid-response - harmless
 
         except urllib.error.HTTPError as e:
             body = e.read()

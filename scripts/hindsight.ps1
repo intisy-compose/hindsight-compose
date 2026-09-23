@@ -143,7 +143,7 @@ function Start-Stack {
         Write-Step "[3c] Starting llama controller container..."
         # docker compose stderr (pull/up progress) must not abort under $ErrorActionPreference='Stop'
         try { docker compose -f "$Root\docker-compose.hindsight-only.yml" up -d llama 2>$null | Out-Null } catch {}
-        Write-OK "Container 'llama' started — 'docker stop llama' to kill, 'docker start llama' to restart."
+        Write-OK "Container 'llama' started - 'docker stop llama' to kill, 'docker start llama' to restart."
 
         Write-Step "[3d] Starting docker-event watcher..."
         $WatcherScript = Join-Path $PSScriptRoot "llama-watcher.ps1"
@@ -153,7 +153,7 @@ function Start-Stack {
             -RedirectStandardOutput (Join-Path $LlamaWin "watcher.log") `
             -RedirectStandardError  (Join-Path $LlamaWin "watcher-err.log")
         $watcherProc.Id | Set-Content $WatcherPid
-        Write-OK "Watcher started (PID $($watcherProc.Id)) — logs: $LlamaWin\watcher.log"
+        Write-OK "Watcher started (PID $($watcherProc.Id)) - logs: $LlamaWin\watcher.log"
 
         Write-Step "[4] Waiting for llama to be healthy..."
         Wait-LlamaHealthy -Process $started.Llama
