@@ -1,0 +1,2 @@
+kind: generic
+description: "A Docker stack for running [hindsight](https://github.com/vectorize-io/hindsight) (an agent long-term-memory service) backed by a **local llama.cpp** LLM, with PostgreSQL storage and automatic backups. GPU acceleration is optional and comes in interchangeable overlays."
