@@ -14,9 +14,9 @@ services:
     extra_hosts:
       # Harmless in container modes; required in native mode (llama-server.exe on the host).
       - "host.docker.internal:host-gateway"
+    # The API is for tools on this PC; the control plane (9999) is reached through the gateway.
     ports:
-      - "8888:8888"
-      - "9999:9999"
+      - "127.0.0.1:8888:8888"
     environment:
       HINDSIGHT_API_LLM_PROVIDER: openai
       HINDSIGHT_API_LLM_MODEL: ${MODEL_ALIAS:-qwen2.5:7b}
@@ -128,5 +128,46 @@ services:
           reap
         done
 
+  # Owns the network namespace and publishes the control plane's local port, on loopback only, so
+  # the local address keeps working while tailscale restarts or cannot join.
+  gateway:
+    image: caddy:2.11.4-alpine
+    container_name: hindsight-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9999:9999"
+    environment:
+      HINDSIGHT_HOST: ${HINDSIGHT_HOST:-hindsight.invalid}
+    volumes:
+      - ./gateway/Caddyfile:/etc/caddy/Caddyfile:ro
+      - tailscale-socket:/var/run/tailscale
+      - hindsight-caddy-data:/data
+
+  # Joins the gateway's namespace and forwards tailnet :443 to Caddy. The node key lives in its own
+  # volume (data/ is the data repo); TS_AUTHKEY is only needed for the first join.
+  tailscale:
+    image: tailscale/tailscale:v1.102.4
+    container_name: hindsight-tailscale
+    restart: unless-stopped
+    network_mode: "service:gateway"
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-hindsight}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - hindsight-tailscale:/var/lib/tailscale
+      - ./gateway/serve.json:/config/serve.json:ro
+      - tailscale-socket:/var/run/tailscale
+    depends_on:
+      gateway:
+        condition: service_started
+        restart: true
+
 volumes:
   hindsight-pg0:
+  hindsight-tailscale:
+  tailscale-socket:
+  hindsight-caddy-data:

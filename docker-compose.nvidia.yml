@@ -44,7 +44,7 @@ services:
       - "--flash-attn"
       - "on"
     ports:
-      - "${LLAMA_PORT:-11434}:11434"
+      - "127.0.0.1:${LLAMA_PORT:-11434}:11434"
     # The image's built-in healthcheck targets port 8080; override it to our actual port so
     # the container reports healthy once the model is loaded. Generous start_period covers the
     # slow first model load (faulted in through the Windows bind-mount, ~2-3 min).
