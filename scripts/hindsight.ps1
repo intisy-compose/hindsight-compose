@@ -74,7 +74,49 @@ function Get-DockerComposeFile {
     return $null
 }
 
+function Get-TailnetStatus {
+    $raw = docker compose -f "$Root\docker-compose.hindsight-only.yml" exec -T tailscale tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>$null
+    if (-not $raw) { return $null }
+    try { return ($raw | Out-String | ConvertFrom-Json) } catch { return $null }
+}
+
+# Hindsight itself does not need the tailnet, so a node that cannot join only loses the tailnet
+# address; the gateway's certificate is for the ts.net name, written to config.env first.
+function Connect-Tailnet {
+    Write-Step "[0b] Joining the tailnet..."
+    try { docker compose -f "$Root\docker-compose.hindsight-only.yml" up -d tailscale 2>$null | Out-Null } catch {}
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $deadline) {
+        $status = Get-TailnetStatus
+        if ($status -and $status.BackendState -eq "Running" -and $status.Self.DNSName) {
+            $tailnetHost = $status.Self.DNSName.TrimEnd('.')
+            Write-OK "Joined as $tailnetHost"
+            if ($Env:HINDSIGHT_HOST -ne $tailnetHost) {
+                $configFile = Join-Path $Root "config.env"
+                $lines = @(Get-Content $configFile)
+                if ($lines -match '^\s*HINDSIGHT_HOST\s*=') { $lines = $lines -replace '^\s*HINDSIGHT_HOST\s*=.*$', "HINDSIGHT_HOST=$tailnetHost" }
+                else { $lines += "HINDSIGHT_HOST=$tailnetHost" }
+                [System.IO.File]::WriteAllText($configFile, (($lines -join "`n") + "`n"))
+                $Env:HINDSIGHT_HOST = $tailnetHost
+                Write-OK "Wrote HINDSIGHT_HOST to config.env."
+            }
+            return
+        }
+        Start-Sleep 2
+    }
+    $hint = if ($Env:TS_AUTHKEY) { "an expired or used-up TS_AUTHKEY is the usual cause" } else { "TS_AUTHKEY in config.env is empty" }
+    Write-Info "Not on the tailnet ($hint); the control plane is on localhost only."
+}
+
+function Show-Urls {
+    Write-Host "  Control plane : http://localhost:9999"
+    if ($Env:HINDSIGHT_HOST) { Write-Host "  On the tailnet: https://$($Env:HINDSIGHT_HOST)   (from any device on your tailnet)" }
+    Write-Host "  Hindsight API : http://localhost:8888   (this PC only)"
+    Write-Host "  llama API     : http://localhost:$Port"
+}
+
 function Start-Stack {
+    Connect-Tailnet
     Write-Step "[0] Stopping any previous stack..."
     Stop-NativeLlama
     Stop-DockerContainer "llama"
@@ -202,8 +244,7 @@ function Start-Stack {
 
     Write-Host ""
     Write-Host "Stack is up." -ForegroundColor Green
-    Write-Host "  Hindsight UI : http://localhost:8888"
-    Write-Host "  llama API    : http://localhost:$Port"
+    Show-Urls
     if (-not $DockerLlama) {
         Write-Host "  llama logs   : .\docker-compose.ps1 logs"
     }

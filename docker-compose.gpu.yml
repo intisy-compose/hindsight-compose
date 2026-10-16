@@ -24,7 +24,7 @@ services:
       GPU_BACKEND: "vulkan"
     command: ["--parallel", "1", "--threads-http", "2", "--ubatch-size", "${LLAMA_UBATCH_SIZE:-256}", "--flash-attn", "on"]
     ports:
-      - "${LLAMA_PORT:-11434}:11434"
+      - "127.0.0.1:${LLAMA_PORT:-11434}:11434"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:11434/health >/dev/null 2>&1 || exit 1"]
       interval: 10s

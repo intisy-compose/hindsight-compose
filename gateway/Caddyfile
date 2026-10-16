@@ -1,0 +1,20 @@
+# tailscale shares this container's network namespace. Certificates for the ts.net name come from
+# tailscaled over its socket, never from a public CA, so every device on the tailnet gets real HTTPS.
+{
+	admin off
+	auto_https disable_redirects
+}
+
+{$HINDSIGHT_HOST}:443 {
+	tls {
+		get_certificate tailscale
+	}
+	encode gzip
+	reverse_proxy hindsight:9999
+}
+
+# This PC only: the port is published on 127.0.0.1, and tailnet traffic reaches nothing but :443.
+http://:9999 {
+	encode gzip
+	reverse_proxy hindsight:9999
+}
