@@ -65,10 +65,11 @@ $usage = @{
     "reingest"    = "[-Limit N] [-MinKB N] rebuild the memory bank from Claude Code transcripts"
     "restore"     = "[-File dump.sql] restore the database from a backup dump (newest by default)"
     "save-images" = "Save the stack's images to images/ for an offline reinstall"
+    "prove-data"  = "DESTRUCTIVE: delete the database volume and prove the self-restore brings every table back"
     "data"        = "status | use [owner/repo[@ref]]  point data/ at a data repo (none = template)"
 }
 
-$helpers = @("consolidate", "reingest", "restore", "save-images")
+$helpers = @("consolidate", "reingest", "restore", "save-images", "prove-data")
 
 switch ($Command.ToLower()) {
     { $_ -in "start", "stop", "logs" } {
