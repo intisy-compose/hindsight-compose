@@ -5,7 +5,7 @@
 services:
   hindsight:
     image: ghcr.io/vectorize-io/hindsight:latest
-    container_name: hindsight
+    container_name: hindsight-server
     restart: unless-stopped
     # pg0 runs inside this container and needs shared memory for parallel index builds /
     # large restores. Docker's 64MB /dev/shm default caused "could not resize shared memory

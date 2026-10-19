@@ -104,4 +104,4 @@ foreach ($file in $files) {
     }
 }
 Write-OK "Submitted $submitted async retain request(s) across $($files.Count) transcript(s)."
-Write-Info "They process on the GPU in the background. Watch: docker logs hindsight -f"
+Write-Info "They process on the GPU in the background. Watch: docker logs hindsight-server -f"

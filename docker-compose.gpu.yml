@@ -9,7 +9,7 @@ services:
       context: ./gpu
       dockerfile: Dockerfile.llama-vulkan
     image: llama-vulkan-dozen:latest
-    container_name: llama
+    container_name: hindsight-llama
     restart: unless-stopped
     devices:
       - "/dev/dxg:/dev/dxg"

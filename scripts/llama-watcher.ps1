@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Watches docker events for the 'llama' controller container and starts/stops the
+    Watches docker events for the hindsight-llama controller container and starts/stops the
     native llama-server.exe + proxy on the host to match.
     Started by hindsight.ps1 on stack start; runs hidden in the background.
     PID is saved to llama-win\watcher.pid. Launch/teardown logic lives in llama-lib.ps1.
@@ -23,11 +23,11 @@ function Write-Watch([string]$Message) {
     "$(Get-Date -f 'HH:mm:ss') [watcher] $Message"
 }
 
-Write-Watch "Watching docker events for container 'llama'..."
+Write-Watch "Watching docker events for container 'hindsight-llama'..."
 
 # Explicit event filters keep healthcheck exec_* noise out of the stream.
 docker events `
-    --filter "container=llama" `
+    --filter "container=hindsight-llama" `
     --filter "event=start" `
     --filter "event=stop" `
     --filter "event=die" `

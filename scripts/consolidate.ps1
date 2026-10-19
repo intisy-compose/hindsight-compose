@@ -73,8 +73,8 @@ asyncio.run(run())
 '@
     $tmp = Join-Path $env:TEMP "consol_reset.py"
     $py | Set-Content $tmp
-    docker cp $tmp hindsight:/tmp/consol_reset.py | Out-Null
-    docker exec hindsight python3 /tmp/consol_reset.py
+    docker cp $tmp hindsight-server:/tmp/consol_reset.py | Out-Null
+    docker exec hindsight-server python3 /tmp/consol_reset.py
 }
 
 if (-not $RunImmediately) {

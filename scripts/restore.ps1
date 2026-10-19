@@ -33,7 +33,7 @@ $running = docker ps -q --filter "name=^hindsight$" 2>$null
 if (-not $running) { throw "hindsight container is not running. Start the stack first." }
 
 Write-Step "Restoring Hindsight DB from $File ..."
-docker cp $File hindsight:/tmp/hindsight-restore.sql | Out-Null
-docker exec hindsight sh -c "PGPASSWORD=hindsight /home/hindsight/.pg0/installation/*/bin/psql -h 127.0.0.1 -U hindsight -d hindsight -v ON_ERROR_STOP=0 -f /tmp/hindsight-restore.sql" 2>&1 | Select-String -Pattern "ERROR|ROLLBACK|COPY|INSERT 0" | Select-Object -Last 10
-docker exec hindsight rm -f /tmp/hindsight-restore.sql | Out-Null
-Write-OK "Restore finished. Restart hindsight to load the restored data cleanly: docker restart hindsight"
+docker cp $File hindsight-server:/tmp/hindsight-restore.sql | Out-Null
+docker exec hindsight-server sh -c "PGPASSWORD=hindsight /home/hindsight/.pg0/installation/*/bin/psql -h 127.0.0.1 -U hindsight -d hindsight -v ON_ERROR_STOP=0 -f /tmp/hindsight-restore.sql" 2>&1 | Select-String -Pattern "ERROR|ROLLBACK|COPY|INSERT 0" | Select-Object -Last 10
+docker exec hindsight-server rm -f /tmp/hindsight-restore.sql | Out-Null
+Write-OK "Restore finished. Restart hindsight to load the restored data cleanly: docker restart hindsight-server"
