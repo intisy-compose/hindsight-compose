@@ -6,9 +6,12 @@
     DESTRUCTIVE: it deletes the database volume. Run it only with the owner's go-ahead.
 
 .NOTES
-    The stack must be running, because the counts come from the embedded Postgres. The restore itself is
-    the db-backup sidecar's restore_if_empty, which reads the newest dump from data/hindsight, so a dump
-    younger than 20 minutes is required first; an older one is replaced by one fresh dump.
+    The stack must be running (hindsight-server and hindsight-db-backup), because the counts come from the
+    embedded Postgres. The restore itself is the db-backup sidecar's restore_if_empty, which reads the
+    newest dump from data/hindsight; a fresh dump is always written right before the "before" count, so
+    writes after an older dump cannot look like a failed restore. The database must hold data: the wait
+    ends when public.memory_units is non-empty. public.async_operations is printed but not compared,
+    because the worker rewrites it after a restore (processing back to pending).
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -20,7 +23,7 @@ $DumpFolder = Join-Path $Root "data\hindsight"
 $Pg0Volume = "hindsight-compose_hindsight-pg0"
 $ServerContainer = "hindsight-server"
 $BackupContainer = "hindsight-db-backup"
-$MaximumDumpAgeMinutes = 20
+$UncomparedTables = @("public.async_operations")
 $RestoreTimeoutMinutes = 15
 $MemoryTable = "public.memory_units"
 
@@ -52,14 +55,11 @@ function Write-FreshDump {
     if ($LASTEXITCODE -ne 0) { throw "the fresh dump failed" }
 }
 
-function Confirm-RecentDump {
-    $newest = Get-NewestDump $DumpFolder "hindsight-*.sql"
-    $isRecent = $newest -and ((Get-Date) - $newest.LastWriteTime).TotalMinutes -lt $MaximumDumpAgeMinutes
-    if ($isRecent) { Write-Info "newest dump $($newest.Name) is recent enough"; return }
-    Write-Info "no dump younger than $MaximumDumpAgeMinutes minutes, taking one"
+function Write-VerifiedFreshDump {
     Write-FreshDump
     $newest = Get-NewestDump $DumpFolder "hindsight-*.sql"
     if (-not $newest) { throw "no complete dump exists in $DumpFolder" }
+    Write-Info "dump $($newest.Name)"
 }
 
 function Wait-ForRestore {
@@ -75,9 +75,10 @@ function Wait-ForRestore {
     throw "$MemoryTable stayed empty for $RestoreTimeoutMinutes minutes"
 }
 
-function Compare-Counts([System.Collections.IDictionary]$Before, [System.Collections.IDictionary]$After) {
+function Compare-Counts([System.Collections.IDictionary]$Before, [System.Collections.IDictionary]$After, [string[]]$Uncompared = @()) {
     $differences = @()
     foreach ($name in (@($Before.Keys) + @($After.Keys) | Sort-Object -Unique)) {
+        if ($name -in $Uncompared) { continue }
         $beforeCount = if ($Before.Contains($name)) { $Before[$name] } else { "missing" }
         $afterCount = if ($After.Contains($name)) { $After[$name] } else { "missing" }
         if ("$beforeCount" -ne "$afterCount") { $differences += "$name before=$beforeCount after=$afterCount" }
@@ -85,10 +86,20 @@ function Compare-Counts([System.Collections.IDictionary]$Before, [System.Collect
     return $differences
 }
 
-if (-not (Test-ContainerIsRunning $ServerContainer)) { throw "$ServerContainer is not running; start the stack first" }
+function Write-UncomparedCounts([System.Collections.IDictionary]$Before, [System.Collections.IDictionary]$After) {
+    foreach ($name in $UncomparedTables) {
+        $beforeCount = if ($Before.Contains($name)) { $Before[$name] } else { "missing" }
+        $afterCount = if ($After.Contains($name)) { $After[$name] } else { "missing" }
+        Write-Info "$name (not compared) before=$beforeCount after=$afterCount"
+    }
+}
 
-Write-Step "Checking for a recent dump ..."
-Confirm-RecentDump
+foreach ($container in @($ServerContainer, $BackupContainer)) {
+    if (-not (Test-ContainerIsRunning $container)) { throw "$container is not running; start the stack first (both $ServerContainer and $BackupContainer must be up)" }
+}
+
+Write-Step "Writing a fresh dump ..."
+Write-VerifiedFreshDump
 
 Write-Step "Counting rows before ..."
 $before = Get-HindsightTableCounts
@@ -105,7 +116,8 @@ Wait-ForRestore
 
 Write-Step "Counting rows after ..."
 $after = Get-HindsightTableCounts
-$differences = Compare-Counts $before $after
+Write-UncomparedCounts $before $after
+$differences = Compare-Counts $before $after $UncomparedTables
 if ($differences) {
     $differences | ForEach-Object { Write-Host "  DIFFERS $_" -ForegroundColor Red }
     exit 1
