@@ -10,7 +10,7 @@ services:
   # hindsight's depends_on/health view is consistent with the container modes.
   llama:
     image: alpine:latest
-    container_name: llama
+    container_name: hindsight-llama
     restart: unless-stopped
     command: ["tail", "-f", "/dev/null"]
     extra_hosts:
