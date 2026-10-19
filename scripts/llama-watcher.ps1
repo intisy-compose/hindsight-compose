@@ -23,6 +23,19 @@ function Write-Watch([string]$Message) {
     "$(Get-Date -f 'HH:mm:ss') [watcher] $Message"
 }
 
+<#
+.NOTES
+  A destroyed container means the stack was taken down or deleted; `start` launches a new watcher.
+  The `docker events` child is killed explicitly because it would otherwise block until its next event.
+#>
+function Exit-Watcher {
+    Write-Watch "Container destroyed, watcher exits."
+    Get-CimInstance Win32_Process -Filter "ParentProcessId=$PID AND Name='docker.exe'" |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Remove-Item (Join-Path (Get-LlamaPaths).LlamaWin "watcher.pid") -Force -ErrorAction SilentlyContinue
+    exit 0
+}
+
 Write-Watch "Watching docker events for container 'hindsight-llama'..."
 
 # Explicit event filters keep healthcheck exec_* noise out of the stream.
@@ -48,6 +61,7 @@ ForEach-Object {
             # stop / die / destroy all tear the native processes down.
             Stop-NativeLlamaAndProxy
             Write-Watch "Stopped llama-server + proxy."
+            if ($_ -eq "destroy") { Exit-Watcher }
         }
     }
 }
