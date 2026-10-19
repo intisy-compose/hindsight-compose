@@ -170,4 +170,4 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 if __name__ == '__main__':
     mode = "json-repair" if HAS_REPAIR else "regex-fallback"
     print(f"llama-proxy [{mode}]: :{LISTEN_PORT} -> {UPSTREAM}", flush=True)
-    ThreadedHTTPServer(('0.0.0.0', LISTEN_PORT), ProxyHandler).serve_forever()
+    ThreadedHTTPServer(('127.0.0.1', LISTEN_PORT), ProxyHandler).serve_forever()
