@@ -1,6 +1,8 @@
 # NVIDIA CUDA llama in a container, using the official prebuilt llama.cpp server image
 # (no source build). Inherits hindsight + backups from the shared base, so settings/backups
 # stay identical across all modes. Auto-starts on reboot via the restart policy.
+name: hindsight-compose
+
 include:
   - docker-compose.base.yml
 

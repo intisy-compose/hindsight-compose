@@ -6,6 +6,9 @@ $forwarded = $args
 
 Set-StrictMode -Version Latest
 
+# The pinned `name:` must win, because the restore guard checks the volume by that name.
+Remove-Item Env:\COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+
 function Import-Config([string]$Path) {
     if (-not (Test-Path $Path)) { throw "Config not found: $Path" }
     Get-Content $Path |

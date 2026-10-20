@@ -2,6 +2,8 @@
 # Inherits hindsight + backups from the shared base; only the llama healthcheck stub and the
 # host-pointing LLM URL differ. NOTE: native llama-server.exe does NOT auto-start on reboot -
 # use a container mode (docker-compose.nvidia.yml / .gpu.yml) if you want auto-start.
+name: hindsight-compose
+
 include:
   - docker-compose.base.yml
 
