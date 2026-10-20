@@ -1,5 +1,7 @@
 # AMD (Vulkan via Dozen/WSL2) llama in a container. Inherits hindsight + backups from the
 # shared base, so settings/backups stay identical across all modes. Auto-starts on reboot.
+name: hindsight-compose
+
 include:
   - docker-compose.base.yml
 

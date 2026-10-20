@@ -29,7 +29,7 @@ if (-not $File) {
 }
 if (-not (Test-Path $File)) { throw "Backup not found: $File" }
 
-$running = docker ps -q --filter "name=^hindsight$" 2>$null
+$running = docker ps -q --filter "name=^hindsight-server$" 2>$null
 if (-not $running) { throw "hindsight container is not running. Start the stack first." }
 
 Write-Step "Restoring Hindsight DB from $File ..."

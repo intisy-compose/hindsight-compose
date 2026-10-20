@@ -16,6 +16,9 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# The pinned `name:` must win, because the volume deleted below is named after that project.
+Remove-Item Env:\COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+
 . (Join-Path $PSScriptRoot "data-on-disk.ps1")
 
 $Root = Split-Path $PSScriptRoot
@@ -30,9 +33,20 @@ $MemoryTable = "public.memory_units"
 function Write-Step([string]$Message) { Write-Host $Message -ForegroundColor Cyan }
 function Write-Info([string]$Message) { Write-Host "  $Message" -ForegroundColor Gray }
 
+<#
+.SYNOPSIS
+Runs a docker-compose.ps1 verb; only "stop" has its exit code trusted.
+.NOTES
+After "start" the exit code belongs to whichever native call ran last inside it, not to "start" itself,
+so success after "start" is judged by Wait-ForRestore and the table counts instead.
+#>
 function Invoke-Stack([string]$Verb) {
     & (Join-Path $Root "docker-compose.ps1") $Verb
-    if ($LASTEXITCODE -ne 0) { throw "docker-compose.ps1 $Verb failed with exit code $LASTEXITCODE" }
+    if ($Verb -eq "stop" -and $LASTEXITCODE -ne 0) { throw "docker-compose.ps1 stop failed with exit code $LASTEXITCODE" }
+}
+
+function Write-RecoveryHint([string]$DumpName) {
+    Write-Host "$Pg0Volume was deleted. Recover with: .\docker-compose.ps1 start   then, if $MemoryTable stays empty,   .\docker-compose.ps1 restore -File data\hindsight\$DumpName" -ForegroundColor Red
 }
 
 function Test-ContainerIsRunning([string]$Name) {
@@ -60,6 +74,7 @@ function Write-VerifiedFreshDump {
     $newest = Get-NewestDump $DumpFolder "hindsight-*.sql"
     if (-not $newest) { throw "no complete dump exists in $DumpFolder" }
     Write-Info "dump $($newest.Name)"
+    return $newest
 }
 
 function Wait-ForRestore {
@@ -99,7 +114,7 @@ foreach ($container in @($ServerContainer, $BackupContainer)) {
 }
 
 Write-Step "Writing a fresh dump ..."
-Write-VerifiedFreshDump
+$newest = Write-VerifiedFreshDump
 
 Write-Step "Counting rows before ..."
 $before = Get-HindsightTableCounts
@@ -110,16 +125,20 @@ Invoke-Stack "stop"
 docker volume rm $Pg0Volume
 if ($LASTEXITCODE -ne 0) { throw "could not remove $Pg0Volume" }
 
-Write-Step "Starting the stack and waiting for the self-restore ..."
-Invoke-Stack "start"
-Wait-ForRestore
+try {
+    Write-Step "Starting the stack and waiting for the self-restore ..."
+    Invoke-Stack "start"
+    Wait-ForRestore
 
-Write-Step "Counting rows after ..."
-$after = Get-HindsightTableCounts
+    Write-Step "Counting rows after ..."
+    $after = Get-HindsightTableCounts
+}
+catch { Write-RecoveryHint $newest.Name; throw }
 Write-UncomparedCounts $before $after
 $differences = Compare-Counts $before $after $UncomparedTables
 if ($differences) {
     $differences | ForEach-Object { Write-Host "  DIFFERS $_" -ForegroundColor Red }
+    Write-RecoveryHint $newest.Name
     exit 1
 }
 Write-Host "  all $($after.Count) tables match" -ForegroundColor Green
