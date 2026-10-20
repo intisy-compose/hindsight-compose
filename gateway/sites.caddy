@@ -1,0 +1,10 @@
+{$TAILNET_HOST}:443 {
+	import tailnet
+	encode gzip
+	reverse_proxy hindsight:9999
+}
+
+http://:9999 {
+	encode gzip
+	reverse_proxy hindsight:9999
+}

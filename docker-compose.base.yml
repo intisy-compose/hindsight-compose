@@ -128,50 +128,26 @@ services:
           reap
         done
 
-  # Owns the network namespace and publishes the control plane's local port, on loopback only, so
-  # the local address keeps working while tailscale restarts or cannot join.
   gateway:
-    image: caddy:2.11.4-alpine
+    extends: { file: gateway/gateway.yml, service: gateway }
     container_name: hindsight-gateway
-    restart: unless-stopped
     ports:
       - "127.0.0.1:9999:9999"
     environment:
-      HINDSIGHT_HOST: ${HINDSIGHT_HOST:-hindsight.invalid}
-    volumes:
-      - ./gateway/Caddyfile:/etc/caddy/Caddyfile:ro
-      - tailscale-socket:/var/run/tailscale
-      - hindsight-caddy-data:/data
+      TAILNET_HOST: ${HINDSIGHT_HOST:-hindsight.invalid}
 
-  # Joins the gateway's namespace and forwards tailnet :443 to Caddy. The node key lives in data/tailscale
-  # (the data repo, git-ignored); TS_AUTHKEY is only needed for the first join.
   tailscale:
-    image: tailscale/tailscale:v1.102.4
+    extends: { file: gateway/gateway.yml, service: tailscale }
     container_name: hindsight-tailscale
-    restart: unless-stopped
-    network_mode: "service:gateway"
     environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_HOSTNAME: ${TS_HOSTNAME:-hindsight}
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "true"
-      TS_SOCKET: /var/run/tailscale/tailscaled.sock
-      TS_SERVE_CONFIG: /config/serve.json
-    volumes:
-      - ./data/tailscale:/var/lib/tailscale
-      - ./gateway/serve.json:/config/serve.json:ro
-      - tailscale-socket:/var/run/tailscale
-    depends_on:
-      gateway:
-        condition: service_started
-        restart: true
 
 volumes:
   hindsight-pg0:
   tailscale-socket:
-  hindsight-caddy-data:
+  gateway-caddy-data:
 
 x-volume-roles:
   hindsight-pg0: self-restored
-  hindsight-caddy-data: rebuilt
+  gateway-caddy-data: rebuilt
   tailscale-socket: rebuilt
