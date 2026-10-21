@@ -8,7 +8,7 @@ include:
 
 services:
   llama:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b9641
     container_name: hindsight-llama
     restart: unless-stopped
     deploy:

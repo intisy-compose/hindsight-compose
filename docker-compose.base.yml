@@ -4,7 +4,7 @@
 # (native mode additionally overrides HINDSIGHT_API_LLM_BASE_URL to host.docker.internal).
 services:
   hindsight:
-    image: ghcr.io/vectorize-io/hindsight:latest
+    image: ghcr.io/vectorize-io/hindsight:0.8.2
     container_name: hindsight-server
     restart: unless-stopped
     # pg0 runs inside this container and needs shared memory for parallel index builds /
@@ -44,7 +44,7 @@ services:
   # Shares hindsight's network namespace to reach the embedded pg0 on 127.0.0.1:5432, and
   # writes logical SQL dumps to ./data/hindsight on the Windows host (survives a Docker reinstall).
   db-backup:
-    image: postgres:18-alpine
+    image: postgres:18.4-alpine
     container_name: hindsight-db-backup
     restart: unless-stopped
     depends_on:

@@ -11,7 +11,7 @@ services:
   # Stub container whose health mirrors the real llama-server.exe running on the host, so
   # hindsight's depends_on/health view is consistent with the container modes.
   llama:
-    image: alpine:latest
+    image: alpine:3.24.2
     container_name: hindsight-llama
     restart: unless-stopped
     command: ["tail", "-f", "/dev/null"]
