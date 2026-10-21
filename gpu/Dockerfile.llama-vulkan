@@ -24,7 +24,7 @@ RUN meson setup build \
     && ninja -C build -j"$(nproc)" \
     && ninja -C build install
 
-ARG LLAMA_REF=master
+ARG LLAMA_REF=b9641
 RUN git clone --depth 1 --branch ${LLAMA_REF} \
       https://github.com/ggml-org/llama.cpp /src/llama.cpp
 WORKDIR /src/llama.cpp

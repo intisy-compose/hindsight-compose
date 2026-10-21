@@ -74,6 +74,15 @@ function Get-DockerComposeFile {
     return $null
 }
 
+function Get-ComposeImage([string]$ComposeFile, [string]$Pattern) {
+    docker compose -f "$Root\$ComposeFile" config --images 2>$null |
+        Where-Object { $_ -like $Pattern } | Select-Object -First 1
+}
+
+function Test-LocalImage([string]$Image) {
+    [bool](docker image ls --format "{{.Repository}}:{{.Tag}}" 2>$null | Where-Object { $_ -eq $Image })
+}
+
 function Get-TailnetStatus {
     $raw = docker compose -f "$Root\docker-compose.hindsight-only.yml" exec -T tailscale tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>$null
     if (-not $raw) { return $null }
@@ -212,8 +221,7 @@ function Start-Stack {
         # Offline recovery: if the stack images are gone (e.g. clean reinstall) but the saved
         # tar exists, load it locally instead of re-pulling ~14 GB. Sentinel = hindsight image.
         $imageTar   = Join-Path $Root "images\stack-images.tar"
-        $haveImages = [bool](docker image ls --format "{{.Repository}}:{{.Tag}}" 2>$null |
-                          Where-Object { $_ -eq "ghcr.io/vectorize-io/hindsight:latest" })
+        $haveImages = Test-LocalImage (Get-ComposeImage $cf "ghcr.io/vectorize-io/hindsight:*")
         if (-not $haveImages -and (Test-Path $imageTar)) {
             Write-Step "[3] Loading stack images from local tar (offline, skips ~14 GB re-pull)..."
             docker load -i $imageTar
@@ -222,9 +230,7 @@ function Start-Stack {
 
         # CUDA uses the official prebuilt image (no build). Only AMD/Vulkan builds locally.
         if ($cf -eq "docker-compose.gpu.yml") {
-            $built = docker image ls --format "{{.Repository}}:{{.Tag}}" 2>$null |
-                         Where-Object { $_ -eq "llama-vulkan-dozen:latest" }
-            if (-not $built) {
+            if (-not (Test-LocalImage (Get-ComposeImage $cf "llama-vulkan-dozen:*"))) {
                 Write-Step "[3b] Building Vulkan llama image (first time only)..."
                 docker compose -f "$Root\$cf" build llama
             }

@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | `hindsight` | `ghcr.io/vectorize-io/hindsight` | the memory API |
 | `hindsight-pg0` | postgres | vector + relational store |
-| `db-backup` | `postgres:18-alpine` | periodic dumps into `./data/hindsight` |
+| `db-backup` | `postgres` | periodic dumps into `./data/hindsight` |
 | `llama` | built from `gpu/Dockerfile.*` | local OpenAI-compatible LLM endpoint |
 
 ## Compose files
