@@ -48,10 +48,18 @@ print(retains, consolidations)' <<<"$listing" | tr -d '\r'
 }
 
 # restart_hindsight SLOTS: recreates hindsight with SLOTS consolidation worker slots and waits for it.
-# db-backup is recreated with it because it lives in hindsight's network namespace: left alone, it stays
-# in the old container's dead namespace and every dump fails until the next start.
+# db-backup lives in hindsight's network namespace, which every start of hindsight replaces, and
+# hindsight's first start after a recreate can fail on its own database and be restarted by Docker. So
+# the sidecar is recreated only once hindsight answers; joined earlier, every dump fails until the next
+# stack start.
 restart_hindsight() {
-    HINDSIGHT_CONSOLIDATION_SLOTS=$1 compose_with "$compose_file" up -d hindsight db-backup >/dev/null 2>&1 || true
+    HINDSIGHT_CONSOLIDATION_SLOTS=$1 compose_with "$compose_file" up -d hindsight >/dev/null 2>&1 || true
+    wait_for_hindsight
+    compose_with "$compose_file" up -d --force-recreate --no-deps db-backup >/dev/null 2>&1 ||
+        fail "The backup sidecar could not be recreated; run './docker-compose.sh start' to bring it back."
+}
+
+wait_for_hindsight() {
     for _ in $(seq 40); do
         [ "$(http_status "$health_url")" != 200 ] || return 0
         sleep 3

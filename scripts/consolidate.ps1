@@ -49,14 +49,22 @@ function Get-OpCounts {
 
 <#
 .NOTES
-    db-backup lives in hindsight's network namespace, so recreating hindsight alone leaves the
-    sidecar in the old container's dead namespace and every dump fails until the next start.
+    db-backup lives in hindsight's network namespace, which every start of hindsight replaces, and
+    hindsight's first start after a recreate can fail on its own database and be restarted by Docker.
+    So the sidecar is recreated only once hindsight answers; joined earlier, every dump fails until the
+    next stack start.
 #>
 function Restart-Hindsight {
     # Under 'Stop', Windows PowerShell 5.1 turns compose's progress on stderr into a terminating error.
     $ErrorActionPreference = 'Continue'
-    docker compose -f $Compose up -d hindsight db-backup 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "docker compose up -d hindsight db-backup exited with $LASTEXITCODE" }
+    docker compose -f $Compose up -d hindsight 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker compose up -d hindsight exited with $LASTEXITCODE" }
+    Wait-HindsightHealthy
+    docker compose -f $Compose up -d --force-recreate --no-deps db-backup 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker compose up -d db-backup exited with $LASTEXITCODE" }
+}
+
+function Wait-HindsightHealthy {
     for ($i = 0; $i -lt 40; $i++) {
         try { if ((Invoke-WebRequest "http://localhost:8888/health" -TimeoutSec 3 -UseBasicParsing -EA Stop).StatusCode -eq 200) { return } } catch {}
         Start-Sleep 3

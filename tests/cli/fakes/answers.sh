@@ -11,7 +11,7 @@
 #   psql-hold        present: the restoring psql waits for release (see hold_psql)
 #   up-exit, pull-exit, down-exit-<compose file>, load-exit, cp-exit, psql-exit, cleanup-exit,
 #   fresh-dump-exit, volume-rm-exit, counts-exit-N: exit codes (default 0)
-# A compose `up -d hindsight db-backup` appends its HINDSIGHT_CONSOLIDATION_SLOTS to slots; a psql exec notes in
+# A compose `up -d hindsight` appends its HINDSIGHT_CONSOLIDATION_SLOTS to slots; a psql exec notes in
 # pgpassword whether PGPASSWORD reached it through the environment.
 
 state_value() { cat "$state/$1" 2>/dev/null || echo "${2:-}"; }
@@ -73,7 +73,7 @@ answer() {
         "compose -f "*" exec -T tailscale "*) answer_tailnet_status ;;
         "compose -f "*" config --images") answer_images "$3" ;;
         "compose -f "*" up -d --remove-orphans") return "$(state_value up-exit 0)" ;;
-        "compose -f "*" up -d hindsight db-backup") echo "${HINDSIGHT_CONSOLIDATION_SLOTS-unset}" >>"$state/slots" ;;
+        "compose -f "*" up -d hindsight") echo "${HINDSIGHT_CONSOLIDATION_SLOTS-unset}" >>"$state/slots" ;;
         "compose -f "*" pull") return "$(state_value pull-exit 0)" ;;
         "compose -f "*" down") return "$(state_value "down-exit-$3" 0)" ;;
         "load -i "*) return "$(state_value load-exit 0)" ;;
