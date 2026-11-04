@@ -2,8 +2,9 @@
 # Stands in for curl: appends "curl ARGUMENTS" to $FAKE_DOCKER_DIR/calls and answers from its state:
 #   llama-health, hindsight-health  the status of :11434/health and :8888/health (default 200); 000
 #                                   answers as a refused connection does, with exit 7
-#   operations                      the bodies the operations list answers, one per call and line,
-#                                   then {"operations":[]}
+#   operations                      the bodies the operations list answers, one per poll and line,
+#                                   then {"operations":[]}; a poll's status=pending request takes the
+#                                   next line, and each request answers only the operations of its status
 #   post-exit                       the exit of a memories POST (default 0); its body goes to posts
 #   download-exit                   the exit of the model download (default 0)
 #   download-content                the bytes the download appends (default GGUFmodel)
@@ -28,10 +29,16 @@ answer_status() {
 }
 
 answer_operations() {
-    local body
-    body=$(head -n 1 "$state/operations" 2>/dev/null)
-    if [ -n "$body" ]; then sed -i 1d "$state/operations"; else body='{"operations":[]}'; fi
-    echo "$body"
+    local status_filter=$1 body
+    if [ "$status_filter" = pending ]; then
+        body=$(head -n 1 "$state/operations" 2>/dev/null)
+        if [ -n "$body" ]; then sed -i 1d "$state/operations"; else body='{"operations":[]}'; fi
+        printf '%s\n' "$body" >"$state/operations-poll"
+    fi
+    python3 -c 'import json, sys
+body = json.load(sys.stdin)
+print(json.dumps({"operations": [o for o in body.get("operations") or [] if o.get("status") == sys.argv[1]]}))' \
+        "$status_filter" <"$state/operations-poll"
 }
 
 answer_post() {
@@ -58,7 +65,7 @@ if [ "${1:-}" = -sIL ]; then answer_head; exit 0; fi
 case "$url" in
     *:11434/health) answer_status "$(state_value llama-health 200)" ;;
     *:8888/health) answer_status "$(state_value hindsight-health 200)" ;;
-    */operations\?limit=200) answer_operations ;;
+    */operations\?status=*\&limit=100) status_filter=${url##*status=}; answer_operations "${status_filter%%&*}" ;;
     */memories) answer_post ;;
     https://*) answer_download ;;
 esac

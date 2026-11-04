@@ -15,6 +15,29 @@
 # path helpers resolve correctly no matter which script dot-sources us.
 $script:LlamaScriptsDir = $PSScriptRoot
 
+function Get-DockerComposeFile {
+    $nv = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($nv) {
+        & nvidia-smi 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { return "docker-compose.nvidia.yml" }
+    }
+    wsl ls /dev/dxg 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { return "docker-compose.gpu.yml" }
+    return $null
+}
+
+<#
+.NOTES
+    docker-compose.hindsight-only.yml points hindsight at a llama on the host and redefines llama as
+    a stub, so it is the stack's file only in native mode (DOCKER_LLAMA not "true").
+#>
+function Get-StackComposeFile {
+    if ($env:DOCKER_LLAMA -ne "true") { return "docker-compose.hindsight-only.yml" }
+    $composeFile = Get-DockerComposeFile
+    if (-not $composeFile) { throw "No supported GPU found (need NVIDIA via nvidia-smi or AMD via WSL /dev/dxg)." }
+    return $composeFile
+}
+
 function Get-LlamaPaths {
     $scriptsDir = $script:LlamaScriptsDir
     $rootDir    = Split-Path $scriptsDir

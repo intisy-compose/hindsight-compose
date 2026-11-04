@@ -27,32 +27,44 @@ $ErrorActionPreference = 'Stop'
 function Write-Step([string]$m) { Write-Host $m -ForegroundColor Cyan }
 function Write-OK([string]$m)   { Write-Host "  $m" -ForegroundColor Green }
 function Write-Info([string]$m) { Write-Host "  $m" -ForegroundColor Gray }
-function Import-Config([string]$Path) {
-    foreach ($line in Get-Content $Path -ErrorAction SilentlyContinue) {
-        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') {
-            [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
-        }
-    }
-}
+. "$PSScriptRoot\config.ps1"
+. "$PSScriptRoot\llama-lib.ps1"
 
 $Root    = Split-Path $PSScriptRoot
-$Compose = Join-Path $Root "docker-compose.hindsight-only.yml"
 $Api     = "http://localhost:8888/v1/default/banks/claude_code/operations"
 
 # config.env feeds docker compose's ${...} interpolation (model alias, ports, etc.)
 Import-Config (Join-Path $Root "config.env")
+$Compose = Join-Path $Root (Get-StackComposeFile)
 
 function Get-OpCounts {
-    $ops = (Invoke-RestMethod -Uri "$Api`?limit=200").operations
     $active = @('pending', 'processing')
+    # The API returns at most 100 operations, and completed ones fill an unfiltered page.
+    $ops = foreach ($status in $active) { (Invoke-RestMethod -Uri "$Api`?status=$status&limit=100").operations }
     [pscustomobject]@{
         RetainPending = @($ops | Where-Object { $_.task_type -match 'retain' -and $_.status -in $active }).Count
         ConsolPending = @($ops | Where-Object { $_.task_type -eq 'consolidation' -and $_.status -in $active }).Count
     }
 }
 
+<#
+.NOTES
+    db-backup lives in hindsight's network namespace, which every start of hindsight replaces, and
+    hindsight's first start after a recreate can fail on its own database and be restarted by Docker.
+    So the sidecar is recreated only once hindsight answers; joined earlier, every dump fails until the
+    next stack start.
+#>
 function Restart-Hindsight {
+    # Under 'Stop', Windows PowerShell 5.1 turns compose's progress on stderr into a terminating error.
+    $ErrorActionPreference = 'Continue'
     docker compose -f $Compose up -d hindsight 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker compose up -d hindsight exited with $LASTEXITCODE" }
+    Wait-HindsightHealthy
+    docker compose -f $Compose up -d --force-recreate --no-deps db-backup 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker compose up -d db-backup exited with $LASTEXITCODE" }
+}
+
+function Wait-HindsightHealthy {
     for ($i = 0; $i -lt 40; $i++) {
         try { if ((Invoke-WebRequest "http://localhost:8888/health" -TimeoutSec 3 -UseBasicParsing -EA Stop).StatusCode -eq 200) { return } } catch {}
         Start-Sleep 3
@@ -73,8 +85,11 @@ asyncio.run(run())
 '@
     $tmp = Join-Path $env:TEMP "consol_reset.py"
     $py | Set-Content $tmp
-    docker cp $tmp hindsight-server:/tmp/consol_reset.py | Out-Null
+    $ErrorActionPreference = 'Continue'
+    docker cp $tmp hindsight-server:/tmp/consol_reset.py 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker cp of the reset script exited with $LASTEXITCODE" }
     docker exec hindsight-server python3 /tmp/consol_reset.py
+    if ($LASTEXITCODE -ne 0) { throw "Resetting stale consolidations exited with $LASTEXITCODE" }
 }
 
 if (-not $RunImmediately) {

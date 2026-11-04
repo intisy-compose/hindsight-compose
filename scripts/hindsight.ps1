@@ -83,17 +83,6 @@ function Invoke-DockerCompose {
     if ($exitCode -ne 0) { throw "docker compose $($args -join ' ') exited with $exitCode" }
 }
 
-function Get-DockerComposeFile {
-    $nv = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-    if ($nv) {
-        & nvidia-smi 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { return "docker-compose.nvidia.yml" }
-    }
-    wsl ls /dev/dxg 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { return "docker-compose.gpu.yml" }
-    return $null
-}
-
 function Get-ComposeImage([string]$ComposeFile, [string]$Pattern) {
     docker compose -f "$Root\$ComposeFile" config --images 2>$null |
         Where-Object { $_ -like $Pattern } | Select-Object -First 1

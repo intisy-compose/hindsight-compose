@@ -9,15 +9,7 @@ Set-StrictMode -Version Latest
 # The pinned `name:` must win, because the restore guard checks the volume by that name.
 Remove-Item Env:\COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
 
-function Import-Config([string]$Path) {
-    if (-not (Test-Path $Path)) { throw "Config not found: $Path" }
-    Get-Content $Path |
-        Where-Object { $_ -notmatch '^\s*#' -and $_ -match '=' } |
-        ForEach-Object {
-            $k, $v = $_ -split '=', 2
-            Set-Item "env:$($k.Trim())" $v.Trim()
-        }
-}
+. "$PSScriptRoot\scripts\config.ps1"
 
 function Show-Usage([hashtable]$Commands) {
     $width = ($Commands.Keys | Measure-Object -Property Length -Maximum).Maximum

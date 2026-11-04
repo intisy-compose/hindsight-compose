@@ -467,10 +467,15 @@ run_cli consolidate --run-immediately --poll-seconds 1
 check "exits 0" status_is 0
 check "does not wait for retains" not_said "Waiting for live retains"
 check "recreates hindsight with the stack's file" called "^compose -f docker-compose.nvidia.yml up -d hindsight$"
+check "recreates the backup sidecar after each restart" [ "$(call_count "^compose -f docker-compose.nvidia.yml up -d --force-recreate --no-deps db-backup$")" -eq 2 ]
+check "only once hindsight answers" called_before ":8888/health$" "up -d --force-recreate --no-deps db-backup$"
+check "not before hindsight" called_before "up -d hindsight$" "up -d --force-recreate --no-deps db-backup$"
 check "never the host-llama file" not_called "hindsight-only.yml up -d hindsight"
 check "slots 1, then 0" [ "$(tr '\n' ' ' <"$state/slots")" = "1 0 " ]
 check "resets stale ops" said "reset stale consolidation: UPDATE 0"
-check "polls three times" [ "$(call_count "operations\?limit=200$")" -eq 3 ]
+check "polls three times" [ "$(call_count "operations\?status=pending&limit=100$")" -eq 3 ]
+check "asks for each active status" [ "$(call_count "operations\?status=processing&limit=100$")" -eq 3 ]
+check "never an unfiltered page" not_called "operations\?limit="
 check "reports the busy poll" said "consolidation pending/processing: 1  (retains waiting: 0)"
 check "says done" said "Done. Consolidation cleared; retains have the GPU again."
 finish
@@ -482,7 +487,7 @@ check "exits 0" status_is 0
 check "says it waits" said "Waiting for live retains to finish before consolidating..."
 check "counts both retain kinds" said "retains still pending: 2"
 check "then empty" said "Retain queue empty."
-check "before enabling" called_before "operations\?limit=200$" "up -d hindsight$"
+check "before enabling" called_before "operations\?status=pending&limit=100$" "up -d hindsight$"
 finish
 
 begin "consolidate fails when hindsight does not come back"
@@ -490,6 +495,7 @@ set_state hindsight-health 000
 run_cli consolidate --run-immediately
 check "exits 1" status_is 1
 check "says so" said "Hindsight did not become healthy after restart."
+check "never joins the sidecar to a hindsight that does not answer" not_called "db-backup$"
 finish
 
 begin "consolidate fails when the operations cannot be read"
@@ -499,7 +505,7 @@ output=$(cd "$caller" && HOME="$home" PATH="$scratch/bad:$fakes:$PATH" FAKE_DOCK
 status=$?
 check "exits 1" status_is 1
 check "says so" said "Hindsight's operations could not be read"
-check "never enables consolidation" not_called "up -d hindsight$"
+check "never enables consolidation" not_called "up -d hindsight"
 rm -rf "$scratch/bad"
 finish
 
