@@ -43,8 +43,10 @@ print(retains, consolidations)' <<<"$listing" | tr -d '\r'
 }
 
 # restart_hindsight SLOTS: recreates hindsight with SLOTS consolidation worker slots and waits for it.
+# db-backup is recreated with it because it lives in hindsight's network namespace: left alone, it stays
+# in the old container's dead namespace and every dump fails until the next start.
 restart_hindsight() {
-    HINDSIGHT_CONSOLIDATION_SLOTS=$1 compose_with "$compose_file" up -d hindsight >/dev/null 2>&1 || true
+    HINDSIGHT_CONSOLIDATION_SLOTS=$1 compose_with "$compose_file" up -d hindsight db-backup >/dev/null 2>&1 || true
     for _ in $(seq 40); do
         [ "$(http_status "$health_url")" != 200 ] || return 0
         sleep 3

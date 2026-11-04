@@ -53,8 +53,13 @@ function Get-OpCounts {
     }
 }
 
+<#
+.NOTES
+    db-backup lives in hindsight's network namespace, so recreating hindsight alone leaves the
+    sidecar in the old container's dead namespace and every dump fails until the next start.
+#>
 function Restart-Hindsight {
-    docker compose -f $Compose up -d hindsight 2>$null | Out-Null
+    docker compose -f $Compose up -d hindsight db-backup 2>$null | Out-Null
     for ($i = 0; $i -lt 40; $i++) {
         try { if ((Invoke-WebRequest "http://localhost:8888/health" -TimeoutSec 3 -UseBasicParsing -EA Stop).StatusCode -eq 200) { return } } catch {}
         Start-Sleep 3

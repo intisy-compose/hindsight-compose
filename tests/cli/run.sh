@@ -466,7 +466,8 @@ set_state operations '{"operations":[{"task_type":"consolidation","status":"proc
 run_cli consolidate --run-immediately --poll-seconds 1
 check "exits 0" status_is 0
 check "does not wait for retains" not_said "Waiting for live retains"
-check "recreates hindsight with the stack's file" called "^compose -f docker-compose.nvidia.yml up -d hindsight$"
+check "recreates hindsight with the stack's file" called "^compose -f docker-compose.nvidia.yml up -d hindsight db-backup$"
+check "recreates the backup sidecar with it" not_called "up -d hindsight$"
 check "never the host-llama file" not_called "hindsight-only.yml up -d hindsight"
 check "slots 1, then 0" [ "$(tr '\n' ' ' <"$state/slots")" = "1 0 " ]
 check "resets stale ops" said "reset stale consolidation: UPDATE 0"
@@ -482,7 +483,7 @@ check "exits 0" status_is 0
 check "says it waits" said "Waiting for live retains to finish before consolidating..."
 check "counts both retain kinds" said "retains still pending: 2"
 check "then empty" said "Retain queue empty."
-check "before enabling" called_before "operations\?limit=200$" "up -d hindsight$"
+check "before enabling" called_before "operations\?limit=200$" "up -d hindsight db-backup$"
 finish
 
 begin "consolidate fails when hindsight does not come back"
@@ -499,7 +500,7 @@ output=$(cd "$caller" && HOME="$home" PATH="$scratch/bad:$fakes:$PATH" FAKE_DOCK
 status=$?
 check "exits 1" status_is 1
 check "says so" said "Hindsight's operations could not be read"
-check "never enables consolidation" not_called "up -d hindsight$"
+check "never enables consolidation" not_called "up -d hindsight"
 rm -rf "$scratch/bad"
 finish
 
