@@ -45,8 +45,9 @@ Import-Config (Join-Path $Root "config.env")
 $Compose = Join-Path $Root (Get-StackComposeFile)
 
 function Get-OpCounts {
-    $ops = (Invoke-RestMethod -Uri "$Api`?limit=200").operations
     $active = @('pending', 'processing')
+    # The API returns at most 100 operations, and completed ones fill an unfiltered page.
+    $ops = foreach ($status in $active) { (Invoke-RestMethod -Uri "$Api`?status=$status&limit=100").operations }
     [pscustomobject]@{
         RetainPending = @($ops | Where-Object { $_.task_type -match 'retain' -and $_.status -in $active }).Count
         ConsolPending = @($ops | Where-Object { $_.task_type -eq 'consolidation' -and $_.status -in $active }).Count

@@ -471,7 +471,9 @@ check "recreates the backup sidecar with it" not_called "up -d hindsight$"
 check "never the host-llama file" not_called "hindsight-only.yml up -d hindsight"
 check "slots 1, then 0" [ "$(tr '\n' ' ' <"$state/slots")" = "1 0 " ]
 check "resets stale ops" said "reset stale consolidation: UPDATE 0"
-check "polls three times" [ "$(call_count "operations\?limit=200$")" -eq 3 ]
+check "polls three times" [ "$(call_count "operations\?status=pending&limit=100$")" -eq 3 ]
+check "asks for each active status" [ "$(call_count "operations\?status=processing&limit=100$")" -eq 3 ]
+check "never an unfiltered page" not_called "operations\?limit="
 check "reports the busy poll" said "consolidation pending/processing: 1  (retains waiting: 0)"
 check "says done" said "Done. Consolidation cleared; retains have the GPU again."
 finish
@@ -483,7 +485,7 @@ check "exits 0" status_is 0
 check "says it waits" said "Waiting for live retains to finish before consolidating..."
 check "counts both retain kinds" said "retains still pending: 2"
 check "then empty" said "Retain queue empty."
-check "before enabling" called_before "operations\?limit=200$" "up -d hindsight db-backup$"
+check "before enabling" called_before "operations\?status=pending&limit=100$" "up -d hindsight db-backup$"
 finish
 
 begin "consolidate fails when hindsight does not come back"

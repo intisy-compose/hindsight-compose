@@ -30,12 +30,17 @@ done
 compose_file=$(gpu_compose_file)
 [ -n "$compose_file" ] || fail "No supported GPU found (need NVIDIA via nvidia-smi), so the stack's compose file is unknown."
 
-# operation_counts: "RETAINS CONSOLIDATIONS", the pending or processing operations of each kind.
+# operation_counts: "RETAINS CONSOLIDATIONS", the pending or processing operations of each kind. One
+# request per status, because the API returns at most 100 operations and completed ones fill an
+# unfiltered page.
 operation_counts() {
-    local listing
-    listing=$(curl -fsS -m 30 "$operations_url?limit=200") || fail "Hindsight's operations could not be read from $operations_url."
+    local listing="" page status_filter
+    for status_filter in pending processing; do
+        page=$(curl -fsS -m 30 "$operations_url?status=$status_filter&limit=100") || fail "Hindsight's operations could not be read from $operations_url."
+        listing+=$page$'\n'
+    done
     python3 -c 'import json, sys
-operations = json.load(sys.stdin).get("operations") or []
+operations = [o for line in sys.stdin if line.strip() for o in json.loads(line).get("operations") or []]
 active = ("pending", "processing")
 retains = sum(1 for o in operations if "retain" in (o.get("task_type") or "") and o.get("status") in active)
 consolidations = sum(1 for o in operations if o.get("task_type") == "consolidation" and o.get("status") in active)
