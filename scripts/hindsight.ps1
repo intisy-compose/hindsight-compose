@@ -283,9 +283,9 @@ function Stop-Stack {
     Stop-DockerContainer "hindsight-llama"
     if ($DockerLlama) {
         $cf = Get-DockerComposeFile
-        if ($cf) { docker compose -f "$Root\$cf" down *>$null }
+        if ($cf) { Invoke-DockerCompose -f "$Root\$cf" down }
     }
-    docker compose -f "$Root\docker-compose.hindsight-only.yml" down *>$null
+    Invoke-DockerCompose -f "$Root\docker-compose.hindsight-only.yml" down
     Write-OK "Done."
 }
 
