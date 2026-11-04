@@ -60,7 +60,10 @@ function Get-OpCounts {
     sidecar in the old container's dead namespace and every dump fails until the next start.
 #>
 function Restart-Hindsight {
+    # Under 'Stop', Windows PowerShell 5.1 turns compose's progress on stderr into a terminating error.
+    $ErrorActionPreference = 'Continue'
     docker compose -f $Compose up -d hindsight db-backup 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker compose up -d hindsight db-backup exited with $LASTEXITCODE" }
     for ($i = 0; $i -lt 40; $i++) {
         try { if ((Invoke-WebRequest "http://localhost:8888/health" -TimeoutSec 3 -UseBasicParsing -EA Stop).StatusCode -eq 200) { return } } catch {}
         Start-Sleep 3
@@ -81,8 +84,11 @@ asyncio.run(run())
 '@
     $tmp = Join-Path $env:TEMP "consol_reset.py"
     $py | Set-Content $tmp
-    docker cp $tmp hindsight-server:/tmp/consol_reset.py | Out-Null
+    $ErrorActionPreference = 'Continue'
+    docker cp $tmp hindsight-server:/tmp/consol_reset.py 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker cp of the reset script exited with $LASTEXITCODE" }
     docker exec hindsight-server python3 /tmp/consol_reset.py
+    if ($LASTEXITCODE -ne 0) { throw "Resetting stale consolidations exited with $LASTEXITCODE" }
 }
 
 if (-not $RunImmediately) {
