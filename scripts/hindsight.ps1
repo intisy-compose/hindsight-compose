@@ -63,6 +63,26 @@ function Wait-LlamaHealthy([System.Diagnostics.Process]$Process = $null) {
     throw "llama did not become ready within 900s."
 }
 
+<#
+.SYNOPSIS
+Runs docker compose with its arguments and throws only when it exits non-zero.
+.NOTES
+Under Windows PowerShell 5.1 with $ErrorActionPreference 'Stop', a redirected native command's
+stderr (compose's pull and up progress) becomes a terminating error, so start failed whenever its
+output was redirected although the stack came up.
+#>
+function Invoke-DockerCompose {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        docker compose @args 2>&1 | ForEach-Object { Write-Host "$_" }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) { throw "docker compose $($args -join ' ') exited with $exitCode" }
+}
+
 function Get-DockerComposeFile {
     $nv = Get-Command nvidia-smi -ErrorAction SilentlyContinue
     if ($nv) {
@@ -210,8 +230,8 @@ function Start-Stack {
         Wait-LlamaHealthy -Process $started.Llama
 
         Write-Step "[5] Starting Hindsight container..."
-        docker compose -f "$Root\docker-compose.hindsight-only.yml" pull hindsight
-        docker compose -f "$Root\docker-compose.hindsight-only.yml" up -d --remove-orphans
+        Invoke-DockerCompose -f "$Root\docker-compose.hindsight-only.yml" pull hindsight
+        Invoke-DockerCompose -f "$Root\docker-compose.hindsight-only.yml" up -d --remove-orphans
 
     } else {
         $cf = Get-DockerComposeFile
@@ -232,18 +252,18 @@ function Start-Stack {
         if ($cf -eq "docker-compose.gpu.yml") {
             if (-not (Test-LocalImage (Get-ComposeImage $cf "llama-vulkan-dozen:*"))) {
                 Write-Step "[3b] Building Vulkan llama image (first time only)..."
-                docker compose -f "$Root\$cf" build llama
+                Invoke-DockerCompose -f "$Root\$cf" build llama
             }
         }
 
         if (-not $haveImages) {
             Write-Step "[4] Pulling images (no local tar found)..."
-            docker compose -f "$Root\$cf" pull 2>$null
+            Invoke-DockerCompose -f "$Root\$cf" pull
         } else {
             Write-Step "[4] Images present locally - skipping pull."
         }
         Write-Step "[5] Starting Docker stack..."
-        docker compose -f "$Root\$cf" up -d --remove-orphans
+        Invoke-DockerCompose -f "$Root\$cf" up -d --remove-orphans
         Write-Step "[6] Waiting for llama to be healthy (slow first model load)..."
         Wait-LlamaHealthy
     }
