@@ -94,20 +94,49 @@ show_urls() {
     echo "  llama API     : http://localhost:$(llama_port)"
 }
 
-# download_model PATH: fetches the model into PATH.part and renames it once complete. A failed
-# download keeps the .part, so the next start resumes it (curl -C -) instead of starting over.
+# remote_length URL: the Content-Length the last response of a HEAD request names, or nothing.
+remote_length() {
+    curl -sIL -m 30 "$1" 2>/dev/null | tr -d '\r' |
+        awk '/^HTTP\// { length_seen = "" } tolower($1) == "content-length:" { length_seen = $2 } END { if (length_seen ~ /^[0-9]+$/) print length_seen }' || true
+}
+
+# model_rejection PART URL: why PART is not the complete model URL serves, or nothing: a GGUF file
+# starts with the bytes GGUF, and its size must match the server's Content-Length when it gives one.
+model_rejection() {
+    local part=$1 url=$2 expected actual
+    [ "$(head -c 4 "$part")" = GGUF ] || { echo "it does not start with GGUF"; return 0; }
+    expected=$(remote_length "$url")
+    actual=$(wc -c <"$part" | tr -d ' ')
+    [ -z "$expected" ] || [ "$expected" = "$actual" ] || echo "it has $actual bytes, the server names $expected"
+}
+
+# download_model PATH: fetches the model into PATH.part and renames it once complete and checked. A
+# failed download keeps the .part, so the next start resumes it (curl -C -); PATH.part.url records
+# which URL it is part of, because resuming another URL's bytes would build a corrupt model.
 download_model() {
-    local model_path=$1 part="$1.part" model_file
+    local model_path=$1 part="$1.part" model_file url reason
     model_file=$(basename "$model_path")
+    url=$(config_value MODEL_URL "$default_model_url")
+    if [ -e "$part" ] && [ "$(cat "$part.url" 2>/dev/null)" != "$url" ]; then
+        info "Discarding $part, a partial download of another URL."
+        rm -f "$part"
+    fi
+    printf '%s\n' "$url" >"$part.url"
     step "[1] Downloading model ($model_file, ~4.4 GB)..."
-    curl -fL --retry 3 -C - -o "$part" "$(config_value MODEL_URL "$default_model_url")" ||
+    curl -fL --retry 3 -C - -o "$part" "$url" ||
         fail "The model download failed; $part is kept and the next start resumes it."
+    reason=$(model_rejection "$part" "$url")
+    if [ -n "$reason" ]; then
+        rm -f "$part" "$part.url"
+        fail "The downloaded model is not usable ($reason); it was deleted, so the next start downloads it again."
+    fi
     mv "$part" "$model_path"
+    rm -f "$part.url"
     ok "Model downloaded."
 }
 
 warn_native_llama_setting() {
-    [ "$(config_value DOCKER_LLAMA)" != true ] || return 0
+    [ "$(config_value DOCKER_LLAMA | tr '[:upper:]' '[:lower:]')" = false ] || return 0
     info "DOCKER_LLAMA=$(config_value DOCKER_LLAMA) selects the native Windows llama-server, which this CLI does not run; using the Docker llama."
 }
 
