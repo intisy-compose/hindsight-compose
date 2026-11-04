@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Stands in for curl: appends "curl ARGUMENTS" to $FAKE_DOCKER_DIR/calls and answers from its state:
+#   llama-health, hindsight-health  the status of :11434/health and :8888/health (default 200); 000
+#                                   answers as a refused connection does, with exit 7
+#   operations                      the bodies the operations list answers, one per call and line,
+#                                   then {"operations":[]}
+#   post-exit                       the exit of a memories POST (default 0); its body goes to posts
+#   download-exit                   the exit of the model download (default 0)
+set -uo pipefail
+state=${FAKE_DOCKER_DIR:?}
+printf 'curl %s\n' "$*" >>"$state/calls"
+url=${!#}
+output=""
+previous=""
+for argument in "$@"; do
+    [ "$previous" != -o ] || output=$argument
+    previous=$argument
+done
+
+state_value() { cat "$state/$1" 2>/dev/null || echo "$2"; }
+
+answer_status() {
+    local status=$1
+    printf '%s' "$status"
+    [ "$status" != 000 ] || exit 7
+}
+
+answer_operations() {
+    local body
+    body=$(head -n 1 "$state/operations" 2>/dev/null)
+    if [ -n "$body" ]; then sed -i 1d "$state/operations"; else body='{"operations":[]}'; fi
+    echo "$body"
+}
+
+answer_post() {
+    cat >>"$state/posts"
+    local exit_code
+    exit_code=$(state_value post-exit 0)
+    [ "$exit_code" -eq 0 ] || { echo "curl: (22) The requested URL returned error: 500" >&2; exit "$exit_code"; }
+}
+
+answer_download() {
+    local exit_code
+    exit_code=$(state_value download-exit 0)
+    if [ "$exit_code" -ne 0 ]; then printf 'partial' >>"$output"; exit "$exit_code"; fi
+    printf 'model' >>"$output"
+}
+
+case "$url" in
+    *:11434/health) answer_status "$(state_value llama-health 200)" ;;
+    *:8888/health) answer_status "$(state_value hindsight-health 200)" ;;
+    */operations\?limit=200) answer_operations ;;
+    */memories) answer_post ;;
+    https://*) answer_download ;;
+esac
+exit 0

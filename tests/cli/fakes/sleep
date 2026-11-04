@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Stands in for sleep, so a wait loop runs through its iterations in an instant.
+exit 0
