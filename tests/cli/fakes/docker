@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Stands in for docker: appends each call to $FAKE_DOCKER_DIR/calls, with a compose call's
+# --project-directory and --env-file left out and its -f file named without its folder, and answers it
+# from answers.sh.
+set -uo pipefail
+fakes=$(cd "$(dirname "$0")" && pwd)
+state=${FAKE_DOCKER_DIR:?names the state folder of the fake}
+# shellcheck source=tests/cli/fakes/answers.sh
+. "$fakes/answers.sh"
+
+if [ "${1:-}" = compose ]; then
+    shift
+    arguments=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --project-directory) shift 2 ;;
+            --env-file) printf '%s\n' "${2##*/}" >"$state/last-env-file"; shift 2 ;;
+            -f) arguments+=(-f "${2##*/}"); shift 2 ;;
+            *) arguments+=("$1"); shift ;;
+        esac
+    done
+    set -- compose "${arguments[@]}"
+fi
+printf '%s\n' "$*" >>"$state/calls"
+printf '%s\n' "${COMPOSE_PROJECT_NAME-unset}" >"$state/compose-project-name"
+answer "$@"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Stands in for nvidia-smi: succeeds unless $FAKE_DOCKER_DIR/gpu says "none", as on a host without an
+# NVIDIA driver.
+set -uo pipefail
+[ "$(cat "${FAKE_DOCKER_DIR:?}/gpu" 2>/dev/null)" != none ]
