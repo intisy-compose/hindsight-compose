@@ -854,6 +854,24 @@ run_cli data use
 check "none means the template" said "Pointing data at https://github.com/intisy-compose/hindsight-data-template.git @ main"
 finish
 
+begin "data use keeps the user of an scp-style URL and splits the ref at the last @"
+run_cli data use git@github.com:someone/hindsight-data.git@winter
+check "exits 0" status_is 0
+check "keeps git@" called "^git -C .* config submodule.data.url git@github.com:someone/hindsight-data.git$"
+check "fetches the ref" called "^git -C .*/data fetch -q origin winter$"
+run_cli data use https://me@git.example.org/someone/hindsight-data.git@v3
+check "a URL's user too" called "^git -C .* config submodule.data.url https://me@git.example.org/someone/hindsight-data.git$"
+check "and its ref" called "^git -C .*/data fetch -q origin v3$"
+finish
+
+begin "data use refuses a ref that is empty or an option"
+for source in someone/hindsight-data@-oops someone/hindsight-data@ git@github.com:someone/x.git@--upload-pack=x; do
+    run_cli data use "$source"
+    check "'$source' exits 1" status_is 1
+    check "'$source' says why" said "A data ref must not be empty or start with '-'"
+done
+finish
+
 echo
 if [ "$failures" -eq 0 ]; then echo "all cases pass"; else echo "$failures cases fail"; fi
 [ "$failures" -eq 0 ]
