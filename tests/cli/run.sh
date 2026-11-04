@@ -7,6 +7,8 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
+REAL_SLEEP=$(command -v sleep)
+export REAL_SLEEP
 fakes="$here/fakes"
 scratch=$(mktemp -d)
 stack="$scratch/hindsight-compose"
@@ -99,10 +101,30 @@ ps1_commands() {
         inside && /^[[:space:]]*"[^"]+"[[:space:]]*=/ { key = $0; sub(/^[[:space:]]*"/, "", key); sub(/".*/, "", key); print key }'
 }
 
-# write_dump NAME [BYTES] [AGE_MINUTES]: a dump file in data/hindsight.
+# write_dump NAME [KIND] [FOLDER]: a dump in FOLDER (data/hindsight by default) of KIND: good (the
+# default), no-rows (public.memory_units is empty), truncated (cut short at a statement boundary),
+# schema-only (no COPY of public.memory_units) or empty (zero bytes).
 write_dump() {
-    head -c "${2:-64}" /dev/zero | tr '\0' x >"$stack/data/hindsight/$1"
-    if [ -n "${3:-}" ]; then touch -d "-$3 minutes" "$stack/data/hindsight/$1"; fi
+    local file="${3:-$stack/data/hindsight}/$1" rows=('1	hello') trailer=('--' '-- PostgreSQL database dump complete' '--')
+    case "${2:-good}" in
+        empty) : >"$file"; return ;;
+        no-rows) rows=() ;;
+        truncated) trailer=() ;;
+        schema-only)
+            printf '%s\n' '-- PostgreSQL database dump' 'CREATE TABLE public.memory_units (id int);' "${trailer[@]}" >"$file"
+            return ;;
+    esac
+    printf '%s\n' '--' '-- PostgreSQL database dump' '--' 'COPY public.banks (id) FROM stdin;' '1' '\.' \
+        'COPY public.memory_units (id, text) FROM stdin;' ${rows[@]+"${rows[@]}"} '\.' ${trailer[@]+"${trailer[@]}"} >"$file"
+}
+
+# wait_for CHECK...: up to 10 s for CHECK to pass.
+wait_for() {
+    for _ in $(seq 100); do
+        "$@" && return 0
+        "$REAL_SLEEP" 0.1
+    done
+    return 1
 }
 
 # write_transcript NAME KB [LINES...]: a transcript of the given JSON lines, padded with a tool-result
@@ -302,7 +324,85 @@ run_cli start
 check "exits 1" status_is 1
 check "says the .part is kept" said "The model download failed; $stack_native/data/llama/Qwen2.5-7B-Instruct-Q4_K_M.gguf.part is kept and the next start resumes it."
 check "the .part is kept" [ -s "$stack/data/llama/Qwen2.5-7B-Instruct-Q4_K_M.gguf.part" ]
+check "its URL is kept beside it" grep -qxF "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf" "$stack/data/llama/Qwen2.5-7B-Instruct-Q4_K_M.gguf.part.url"
 check "no stack up" not_called "up -d --remove-orphans"
+finish
+
+model="$stack/data/llama/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+
+begin "start resumes a .part of the same URL"
+rm "$model"
+printf 'GGUF' >"$model.part"
+config_url=https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+echo "$config_url" >"$model.part.url"
+run_cli start
+check "exits 0" status_is 0
+check "keeps the earlier bytes" [ "$(cat "$model")" = GGUFGGUFmodel ]
+check "no URL file left" [ ! -e "$model.part.url" ]
+finish
+
+begin "start discards a .part of another URL before downloading"
+rm "$model"
+printf 'GGUFother' >"$model.part"
+echo "https://example.invalid/other.gguf" >"$model.part.url"
+run_cli start
+check "exits 0" status_is 0
+check "says so" said "Discarding $stack_native/data/llama/Qwen2.5-7B-Instruct-Q4_K_M.gguf.part, a partial download of another URL."
+check "only the new bytes" [ "$(cat "$model")" = GGUFmodel ]
+finish
+
+begin "start discards a .part with no URL beside it"
+rm "$model"
+printf 'GGUFold' >"$model.part"
+run_cli start
+check "exits 0" status_is 0
+check "only the new bytes" [ "$(cat "$model")" = GGUFmodel ]
+finish
+
+begin "a downloaded file that is not GGUF is deleted, not renamed"
+rm "$model"
+set_state download-content "<html>error</html>"
+run_cli start
+check "exits 1" status_is 1
+check "says why" said "The downloaded model is not usable (it does not start with GGUF); it was deleted, so the next start downloads it again."
+check "no model" [ ! -e "$model" ]
+check "no .part" [ ! -e "$model.part" ]
+check "no URL file" [ ! -e "$model.part.url" ]
+check "no stack up" not_called "up -d --remove-orphans"
+finish
+
+begin "a download whose size differs from the final Content-Length is deleted"
+rm "$model"
+set_state content-length 4400000000
+run_cli start
+check "exits 1" status_is 1
+check "asks a HEAD past the redirect" called "^curl -sIL -m 30 https://huggingface.co/"
+check "says why" said "(it has 9 bytes, the server names 4400000000)"
+check "no model" [ ! -e "$model" ]
+finish
+
+begin "a download whose size matches the Content-Length is renamed"
+rm "$model"
+set_state content-length 9
+run_cli start
+check "exits 0" status_is 0
+check "renamed" [ "$(cat "$model")" = GGUFmodel ]
+finish
+
+begin "only DOCKER_LLAMA=false, in any case, warns about the native llama"
+for value in FALSE False; do
+    sed -i "s/^DOCKER_LLAMA=.*/DOCKER_LLAMA=$value/" "$stack/config.env"
+    run_cli start
+    check "$value warns" said "DOCKER_LLAMA=$value selects the native Windows llama-server"
+done
+for value in "" true no; do
+    sed -i "s/^DOCKER_LLAMA=.*/DOCKER_LLAMA=$value/" "$stack/config.env"
+    run_cli start
+    check "'$value' is silent" not_said "selects the native Windows llama-server"
+done
+sed -i '/^DOCKER_LLAMA=/d' "$stack/config.env"
+run_cli start
+check "unset is silent" not_said "selects the native Windows llama-server"
 finish
 
 begin "start fails when llama never becomes healthy"
@@ -467,10 +567,10 @@ finish
 ## restore
 
 begin "restore copies the newest complete dump in and runs psql in one transaction, stopping at the first error"
-write_dump hindsight-20261103-120000.sql 64
-write_dump hindsight-20261104-120000.sql 64
-write_dump hindsight-20261104-130000.sql.tmp 64
-write_dump hindsight-20261104-140000.sql 0
+write_dump hindsight-20261103-120000.sql
+write_dump hindsight-20261104-120000.sql
+write_dump hindsight-20261104-130000.sql.tmp
+write_dump hindsight-20261104-140000.sql empty
 set_state running hindsight-server
 run_cli restore
 check "exits 0" status_is 0
@@ -481,16 +581,18 @@ check "never on a command line" not_called "PGPASSWORD="
 check "removes the dump as root" called_before "^exec -e PGPASSWORD" "^exec -u root hindsight-server rm -f /tmp/hindsight-restore.sql$"
 check "shows the COPY lines" said "  COPY 12"
 check "says how to reload" said "Restore finished. Restart hindsight to load the restored data cleanly: docker restart hindsight-server"
+check "warns about the live database" said "This is the live database: writes made while it restores are lost, and hindsight needs a restart afterwards."
 finish
 
 begin "restore --file --database restores a named dump into another database"
-write_dump other.sql 64
+write_dump other.sql
 set_state running hindsight-server
 run_cli restore --file ../hindsight-compose/data/hindsight/other.sql --database scratch
 check "exits 0" status_is 0
 check "copies the named file, relative to the caller" called "^cp ($scratch_native/|\.\./)hindsight-compose/data/hindsight/other.sql hindsight-server:"
 check "into scratch" called " -d scratch -v ON_ERROR_STOP=1 "
 check "says so" said "Restoring Hindsight DB 'scratch' from "
+check "no live-database warning" not_said "This is the live database"
 finish
 
 begin "restore of a missing file fails before anything is copied"
@@ -508,8 +610,81 @@ check "exits 1" status_is 1
 check "says so" said "No backups found in $stack_native/data/hindsight"
 finish
 
+begin "restore by default skips a dump with no memory rows and never takes a hand-named file"
+write_dump hindsight-20261103-120000.sql
+write_dump hindsight-20261104-120000.sql no-rows
+write_dump hindsight-manual.sql
+write_dump hindsight-20261105-12.sql
+set_state running hindsight-server
+run_cli restore
+check "exits 0" status_is 0
+check "says why it skips" said "skipping hindsight-20261104-120000.sql: its public.memory_units holds no rows"
+check "restores the older good one" called "^cp .*/hindsight-20261103-120000.sql hindsight-server:"
+check "never the hand-named one" not_called "hindsight-manual.sql|hindsight-20261105-12.sql"
+finish
+
+begin "restore by default refuses when no dump passes the probe, and copies nothing"
+write_dump hindsight-20261103-120000.sql truncated
+write_dump hindsight-20261104-120000.sql no-rows
+set_state running hindsight-server
+run_cli restore
+check "exits 1" status_is 1
+check "names the last one checked" said "No dump in $stack_native/data/hindsight can be restored; the last one checked, hindsight-20261103-120000.sql: it does not end with 'PostgreSQL database dump complete', so it is cut short or not a pg_dump."
+check "copies nothing" not_called "^cp "
+finish
+
+begin "restore --file refuses a dump that would empty the database, and copies nothing"
+set_state running hindsight-server
+write_dump empty-table.sql no-rows "$caller"
+write_dump truncated.sql truncated "$caller"
+write_dump schema.sql schema-only "$caller"
+printf '%s\n' 'SELECT 1;' >"$caller/other.sql"
+run_cli restore --file empty-table.sql --database scratch
+check "an empty table exits 1" status_is 1
+check "an empty table is named" said "empty-table.sql cannot be restored: its public.memory_units holds no rows; nothing was copied."
+run_cli restore --file truncated.sql --database scratch
+check "a truncated dump exits 1" status_is 1
+check "a truncated dump is named" said "truncated.sql cannot be restored: it does not end with 'PostgreSQL database dump complete', so it is cut short or not a pg_dump; nothing was copied."
+run_cli restore --file schema.sql --database scratch
+check "a schema-only dump is named" said "schema.sql cannot be restored: it holds no data for public.memory_units; nothing was copied."
+run_cli restore --file other.sql --database scratch
+check "another SQL file is refused" said "other.sql cannot be restored: it does not end with"
+check "copies nothing" not_called "^cp "
+check "runs no psql" not_called "^exec "
+finish
+
+begin "restore refuses a database name with = or a leading -"
+write_dump hindsight-20261104-120000.sql
+set_state running hindsight-server
+for database in "host=elsewhere" "-x" "a=b"; do
+    run_cli restore --database "$database"
+    check "$database exits 1" status_is 1
+    check "$database prints the usage" said "Usage: ./docker-compose.sh restore [--file dump.sql] [--database name]"
+done
+check "copies nothing" not_called "^cp "
+finish
+
+begin "an interrupted restore still removes the copied dump"
+write_dump hindsight-20261104-120000.sql
+set_state running hindsight-server
+: >"$state/psql-hold"
+(cd "$caller" && HOME="$home" PATH="$fakes:$PATH" FAKE_DOCKER_DIR="$state" \
+    exec bash "$stack/docker-compose.sh" restore --database scratch >"$scratch/interrupted" 2>&1) &
+restore_pid=$!
+check "psql starts" wait_for [ -e "$state/psql-started" ]
+kill -TERM "$restore_pid"
+: >"$state/release"
+wait "$restore_pid"
+status=$?
+output=$(cat "$scratch/interrupted")
+check "exits 130" status_is 130
+check "removes the dump after psql" called_before "^exec -e PGPASSWORD" "^exec -u root hindsight-server rm -f /tmp/hindsight-restore.sql$"
+check "removes it once" [ "$(call_count "^exec -u root hindsight-server rm -f ")" -eq 1 ]
+check "not finished" not_said "Restore finished."
+finish
+
 begin "restore refuses while hindsight is not running"
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 run_cli restore
 check "exits 1" status_is 1
 check "says so" said "hindsight container is not running. Start the stack first."
@@ -517,7 +692,7 @@ check "copies nothing" not_called "^cp "
 finish
 
 begin "a failed psql prints its errors, removes the dump, and says nothing was committed"
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 set_state running hindsight-server
 set_state psql-output 'SET' 'psql:/tmp/hindsight-restore.sql:12: ERROR:  syntax error at or near "BROKEN"'
 set_state psql-exit 3
@@ -531,7 +706,7 @@ check "not finished" not_said "Restore finished."
 finish
 
 begin "a failed psql without error lines prints its last ten lines"
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 set_state running hindsight-server
 set_state psql-output line-{1..12}
 set_state psql-exit 2
@@ -543,7 +718,7 @@ check "not the eleventh from last" not_said "  line-2"
 finish
 
 begin "a failed copy stops before psql"
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 set_state running hindsight-server
 set_state cp-exit 1
 run_cli restore
@@ -553,7 +728,7 @@ check "no psql" not_called "^exec -e PGPASSWORD"
 finish
 
 begin "a failed cleanup is said"
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 set_state running hindsight-server
 set_state cleanup-exit 1
 run_cli restore
@@ -583,7 +758,7 @@ finish
 
 begin "prove-data dumps, counts, stops, deletes pg0, starts, waits, and compares"
 set_state running hindsight-server hindsight-db-backup
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 counts_lines 3 7 >"$state/counts-1"
 counts_lines 0 0 >"$state/counts-2"
 counts_lines 9 7 >"$state/counts"
@@ -602,7 +777,7 @@ finish
 
 begin "prove-data names each difference and how to recover"
 set_state running hindsight-server hindsight-db-backup
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 counts_lines 3 7 >"$state/counts-1"
 printf '%s\n' "public.async_operations|3" "public.memory_units|6" >"$state/counts"
 run_cli prove-data
@@ -614,7 +789,7 @@ finish
 
 begin "prove-data gives up after 15 minutes of an empty memory_units"
 set_state running hindsight-server hindsight-db-backup
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 counts_lines 3 7 >"$state/counts-1"
 counts_lines 0 0 >"$state/counts"
 run_cli prove-data
@@ -626,7 +801,7 @@ finish
 
 begin "prove-data deletes nothing when no table is counted"
 set_state running hindsight-server hindsight-db-backup
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 : >"$state/counts-1"
 run_cli prove-data
 check "exits 1" status_is 1
@@ -642,7 +817,7 @@ run_cli prove-data
 check "a failed dump exits 1" status_is 1
 check "says so" said "the fresh dump failed"
 set_state fresh-dump-exit 0
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 set_state down-exit-docker-compose.hindsight-only.yml 1
 run_cli prove-data
 check "a failed stop exits 1" status_is 1
@@ -652,7 +827,7 @@ finish
 
 begin "prove-data says so when the volume cannot be removed"
 set_state running hindsight-server hindsight-db-backup
-write_dump hindsight-20261104-120000.sql 64
+write_dump hindsight-20261104-120000.sql
 set_state volume-rm-exit 1
 run_cli prove-data
 check "exits 1" status_is 1

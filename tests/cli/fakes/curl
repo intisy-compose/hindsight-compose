@@ -6,6 +6,8 @@
 #                                   then {"operations":[]}
 #   post-exit                       the exit of a memories POST (default 0); its body goes to posts
 #   download-exit                   the exit of the model download (default 0)
+#   download-content                the bytes the download appends (default GGUFmodel)
+#   content-length                  the Content-Length a HEAD request answers (default none)
 set -uo pipefail
 state=${FAKE_DOCKER_DIR:?}
 printf 'curl %s\n' "$*" >>"$state/calls"
@@ -42,10 +44,17 @@ answer_post() {
 answer_download() {
     local exit_code
     exit_code=$(state_value download-exit 0)
-    if [ "$exit_code" -ne 0 ]; then printf 'partial' >>"$output"; exit "$exit_code"; fi
-    printf 'model' >>"$output"
+    if [ "$exit_code" -ne 0 ]; then printf 'GGUFpartial' >>"$output"; exit "$exit_code"; fi
+    printf '%s' "$(state_value download-content GGUFmodel)" >>"$output"
 }
 
+answer_head() {
+    printf 'HTTP/1.1 302 Found\r\nContent-Length: 1\r\n\r\nHTTP/1.1 200 OK\r\n'
+    if [ -f "$state/content-length" ]; then printf 'Content-Length: %s\r\n' "$(cat "$state/content-length")"; fi
+    printf '\r\n'
+}
+
+if [ "${1:-}" = -sIL ]; then answer_head; exit 0; fi
 case "$url" in
     *:11434/health) answer_status "$(state_value llama-health 200)" ;;
     *:8888/health) answer_status "$(state_value hindsight-health 200)" ;;
