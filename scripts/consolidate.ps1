@@ -35,12 +35,14 @@ function Import-Config([string]$Path) {
     }
 }
 
+. "$PSScriptRoot\llama-lib.ps1"
+
 $Root    = Split-Path $PSScriptRoot
-$Compose = Join-Path $Root "docker-compose.hindsight-only.yml"
 $Api     = "http://localhost:8888/v1/default/banks/claude_code/operations"
 
 # config.env feeds docker compose's ${...} interpolation (model alias, ports, etc.)
 Import-Config (Join-Path $Root "config.env")
+$Compose = Join-Path $Root (Get-StackComposeFile)
 
 function Get-OpCounts {
     $ops = (Invoke-RestMethod -Uri "$Api`?limit=200").operations
