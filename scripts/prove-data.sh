@@ -101,7 +101,7 @@ done
 
 step "Writing a fresh dump ..."
 write_fresh_dump
-newest=$(newest_dump "$dump_folder" "hindsight-*.sql") || fail "$dump_folder cannot be listed"
+newest=$(newest_dump "$dump_folder" "hindsight-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].sql") || fail "$dump_folder cannot be listed"
 [ -n "$newest" ] || fail "no complete dump exists in $dump_folder"
 info "dump $newest"
 

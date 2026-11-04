@@ -8,6 +8,7 @@
 #   counts, counts-N the table counts psql prints, "schema.table|count" lines; the Nth count call
 #                    answers counts-N when it exists, else counts
 #   psql-output      what the restoring psql prints (default two COPY lines)
+#   psql-hold        present: the restoring psql waits for release (see hold_psql)
 #   up-exit, pull-exit, down-exit-<compose file>, load-exit, cp-exit, psql-exit, cleanup-exit,
 #   fresh-dump-exit, volume-rm-exit, counts-exit-N: exit codes (default 0)
 # A compose `up -d hindsight` appends its HINDSIGHT_CONSOLIDATION_SLOTS to slots; a psql exec notes in
@@ -47,7 +48,19 @@ answer_counts() {
     if [ -f "$state/counts-$call" ]; then cat "$state/counts-$call"; else state_value counts "public.memory_units|5"; fi
 }
 
+# hold_psql: with psql-hold set, notes psql-started and waits up to 10 s for release, so a test can
+# signal the restore while psql runs.
+hold_psql() {
+    [ -f "$state/psql-hold" ] || return 0
+    : >"$state/psql-started"
+    for _ in $(seq 100); do
+        [ ! -e "$state/release" ] || return 0
+        "${REAL_SLEEP:?}" 0.1
+    done
+}
+
 answer_psql_restore() {
+    hold_psql
     echo "${PGPASSWORD:+set}" >"$state/pgpassword"
     state_value psql-output "$(printf '%s\n' 'SET' 'COPY 12' 'COPY 5')"
     return "$(state_value psql-exit 0)"
