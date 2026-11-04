@@ -27,14 +27,7 @@ $ErrorActionPreference = 'Stop'
 function Write-Step([string]$m) { Write-Host $m -ForegroundColor Cyan }
 function Write-OK([string]$m)   { Write-Host "  $m" -ForegroundColor Green }
 function Write-Info([string]$m) { Write-Host "  $m" -ForegroundColor Gray }
-function Import-Config([string]$Path) {
-    foreach ($line in Get-Content $Path -ErrorAction SilentlyContinue) {
-        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') {
-            [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
-        }
-    }
-}
-
+. "$PSScriptRoot\config.ps1"
 . "$PSScriptRoot\llama-lib.ps1"
 
 $Root    = Split-Path $PSScriptRoot

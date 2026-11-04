@@ -8,16 +8,13 @@
 #>
 
 . "$PSScriptRoot\llama-lib.ps1"
+. "$PSScriptRoot\config.ps1"
 
 # Load config.env into the process environment so llama-lib reads the same settings
 # hindsight.ps1 used (port, GPU layers, context size, model alias, etc.).
 $Root       = Split-Path $PSScriptRoot
 $configPath = Join-Path $Root "config.env"
-foreach ($line in Get-Content $configPath -ErrorAction Stop) {
-    if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') {
-        [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
-    }
-}
+Import-Config $configPath
 
 function Write-Watch([string]$Message) {
     "$(Get-Date -f 'HH:mm:ss') [watcher] $Message"
