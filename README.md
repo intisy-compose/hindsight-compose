@@ -32,7 +32,7 @@ git clone --recursive https://github.com/intisy-compose/hindsight-compose
 cd hindsight-compose
 cp config.env.example config.env   # model, GPU backend, ports, context size
 
-./docker-compose.sh start     # Linux; `./docker-compose.sh help` lists every command
+./docker-compose.sh start     # Linux; run it with no valid command to list them
 .\docker-compose.ps1 start    # Windows, the same commands
 
 # Or compose directly, choosing a backend overlay (each one includes the base):
@@ -63,7 +63,10 @@ runs the Docker llama.
 Maintenance runs through the same CLI: `consolidate`, `reingest`, `restore`, `save-images` and
 `prove-data`. Their implementations live in `scripts/` (a `.ps1` and a `.sh` each), which is not
 meant to be run directly. `restore` applies a dump in one transaction and stops at the first error,
-into `hindsight` or, with `--database` (`-Database`), another existing database.
+into `hindsight` or, with `--database` (`-Database`), another existing database. Before anything is
+copied it refuses a dump that does not end with pg_dump's trailer or holds no row of
+`public.memory_units`, because its `--clean` would otherwise empty the database; by default it takes
+the newest `hindsight-YYYYMMDD-HHMMSS.sql` that passes.
 
 The database restores itself: when the pg0 volume comes up empty, the `db-backup` sidecar restores
 the newest dump in `data/hindsight` before anything else uses it, so neither CLI takes a restore
