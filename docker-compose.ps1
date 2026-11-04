@@ -66,7 +66,7 @@ $usage = @{
     "logs"        = "Tail llama output"
     "consolidate" = "[-RunImmediately] run one consolidation pass, then back to retain-only"
     "reingest"    = "[-Limit N] [-MinKB N] rebuild the memory bank from Claude Code transcripts"
-    "restore"     = "[-File dump.sql] restore the database from a backup dump (newest by default)"
+    "restore"     = "[-File dump.sql] [-Database name] restore a backup dump (newest by default) in one transaction, into hindsight by default"
     "save-images" = "Save the stack's images to images/ for an offline reinstall"
     "prove-data"  = "DESTRUCTIVE: delete the database volume and prove the self-restore brings every table back"
     "data"        = "status | use [owner/repo[@ref]]  point data/ at a data repo (none = template)"
