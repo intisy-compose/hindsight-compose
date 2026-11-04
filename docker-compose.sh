@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # The Linux CLI, with the same commands and messages as docker-compose.ps1.
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 3 ]; }; then
+    echo "docker-compose.sh needs bash 4.3 or newer; this is bash $BASH_VERSION" >&2
+    exit 1
+fi
 set -euo pipefail
 # Empty: every command has a Linux form. What is Windows-only lies inside start, stop and logs, not in
 # a command of its own: the native llama-server.exe with its proxy and docker-event watcher
@@ -40,13 +44,34 @@ run_helper() {
     exec bash "$here/scripts/$name.sh" "$@"
 }
 
+# split_data_source SOURCE: sets data_url and data_ref from owner/repo[@ref] or a git URL[@ref]. The
+# ref follows the last @ after a URL's user@, so git@host:owner/repo@ref keeps its user.
+split_data_source() {
+    local rest=$1 user=""
+    if [[ $rest =~ ^([A-Za-z][A-Za-z0-9+.-]*://[^/@]+@)(.*)$ || $rest =~ ^([^/@:]+@)([^/:]+:.*)$ ]]; then
+        user=${BASH_REMATCH[1]}
+        rest=${BASH_REMATCH[2]}
+    fi
+    data_ref=main
+    if [[ $rest == *@* ]]; then
+        data_ref=${rest##*@}
+        rest=${rest%@*}
+    fi
+    if [[ -z $data_ref || $data_ref == -* ]]; then
+        printf '\033[31m%s\033[0m\n' "A data ref must not be empty or start with '-': '$data_ref'" >&2
+        exit 1
+    fi
+    data_url=$user$rest
+    [[ $data_url == *://* || -n $user ]] || data_url="https://github.com/$data_url.git"
+}
+
 # point_data_at SOURCE: SOURCE is owner/repo[@ref] or a git URL[@ref]; none means the template.
 point_data_at() {
     local source=${1:-} url ref=main
     if [ -n "$source" ]; then
-        url=${source%%@*}
-        [ "$url" = "$source" ] || ref=${source#*@}
-        [[ $url == *://* || $url == git@* ]] || url="https://github.com/$url.git"
+        split_data_source "$source"
+        url=$data_url
+        ref=$data_ref
     else
         url=$(git -C "$here" config -f .gitmodules submodule.data.url)
     fi
