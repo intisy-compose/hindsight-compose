@@ -84,7 +84,8 @@ the newest `hindsight-YYYYMMDD-HHMMSS.sql` that passes.
 The database restores itself: when the pg0 volume comes up empty, the `db-backup` sidecar restores
 the newest dump in `data/hindsight` before anything else uses it, so neither CLI takes a restore
 decision. The sidecar runs `scripts/db-backup.sh` (its own program, not a CLI helper): a dump every
-quarter-hour, then a prune that keeps a tiered set and deletes a `.tmp` only when no process holds it
+quarter-hour, written (and restored) in 1 MiB blocks because Docker Desktop's file sharing crawls at
+musl's 1 KiB, then a prune that keeps a tiered set and deletes a `.tmp` only when no process holds it
 open and it has not changed for 10 minutes, so a crash's leftover goes and a dump being written stays.
 The sidecar shares hindsight's network namespace, so `start` rejoins it once hindsight answers when it
 no longer reaches the database (hindsight restarting on its first boot strands it).

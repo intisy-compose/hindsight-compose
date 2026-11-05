@@ -71,8 +71,7 @@ function Get-HindsightTableCounts {
 }
 
 function Write-FreshDump {
-    $script = 'timestamp=$(date +%Y%m%d-%H%M%S); pg_dump -h 127.0.0.1 -U hindsight -d hindsight --no-owner --clean --if-exists > /backups/hindsight-$timestamp.sql.tmp && mv /backups/hindsight-$timestamp.sql.tmp /backups/hindsight-$timestamp.sql'
-    docker exec -e PGPASSWORD=hindsight $BackupContainer sh -c $script
+    docker exec $BackupContainer sh /usr/local/bin/db-backup.sh dump | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "the fresh dump failed" }
 }
 
