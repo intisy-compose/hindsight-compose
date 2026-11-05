@@ -9,10 +9,37 @@
 #   download-exit                   the exit of the model download (default 0)
 #   download-content                the bytes the download appends (default GGUFmodel)
 #   content-length                  the Content-Length a HEAD request answers (default none)
+#   tailnet-devices                 the Tailscale API's devices, "NODE_ID NAME" per line: a DELETE of
+#                                   one in it answers 200 and removes it, of any other 404; the call
+#                                   is logged as "curl URL HEADER", the header read from stdin
+#   tailnet-status                  present: every Tailscale API call answers this status instead
+# A credential on the command line, where every user of the host can read it, exits 99 instead.
 set -uo pipefail
 state=${FAKE_DOCKER_DIR:?}
-printf 'curl %s\n' "$*" >>"$state/calls"
+for argument in "$@"; do
+    case "$argument" in
+        *Bearer* | *tskey-*) printf 'curl CREDENTIAL ON ARGV %s\n' "$argument" >>"$state/calls"; exit 99 ;;
+    esac
+done
 url=${!#}
+case "$url" in
+    https://api.tailscale.com/api/v2/device/*)
+        node=${url##*/}
+        printf 'curl %s %s\n' "$url" "$(sed -n 's/^header = "\(.*\)"$/\1/p')" >>"$state/calls"
+        if [ -e "$state/tailnet-status" ]; then
+            status=$(cat "$state/tailnet-status")
+            printf '%s' "$status"
+            [ "$status" != 000 ] || exit 7
+        elif grep -q "^$node " "$state/tailnet-devices" 2>/dev/null; then
+            grep -v "^$node " "$state/tailnet-devices" >"$state/tailnet-devices.next"
+            mv "$state/tailnet-devices.next" "$state/tailnet-devices"
+            printf 200
+        else
+            printf 404
+        fi
+        exit 0 ;;
+esac
+printf 'curl %s\n' "$*" >>"$state/calls"
 output=""
 previous=""
 for argument in "$@"; do

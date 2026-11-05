@@ -28,6 +28,8 @@ new_stack() {
     mkdir -p "$stack/scripts" "$stack/data/llama" "$stack/data/hindsight" "$state" "$home/.claude/projects" "$caller"
     cp "$repository/docker-compose.sh" "$repository"/docker-compose*.yml "$repository/config.env.example" "$stack/"
     cp "$repository"/scripts/*.sh "$stack/scripts/"
+    mkdir -p "$stack/gateway"
+    cp "$repository/gateway/tailnet-node.sh" "$stack/gateway/"
     : >"$stack/data/llama/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
     : >"$state/calls"
     stack_native=$stack
@@ -152,7 +154,7 @@ finish
 
 begin "the usage text is the ps1's, with ./docker-compose.sh, / paths and long options"
 run_cli help
-check "the command list" said "Usage: ./docker-compose.sh [consolidate|data|logs|prove-data|reingest|restore|save-images|start|stop]"
+check "the command list" said "Usage: ./docker-compose.sh [consolidate|data|delete|logs|prove-data|reingest|restore|save-images|start|stop]"
 check "consolidate" said "  consolidate  [--run-immediately] [--poll-seconds N] run one consolidation pass, then back to retain-only"
 check "reingest" said "  reingest     [--limit N] [--min-kb N] rebuild the memory bank from Claude Code transcripts"
 check "restore" said "  restore      [--file dump.sql] [--database name] restore a backup dump (newest by default) in one transaction, into hindsight by default"
@@ -180,7 +182,7 @@ begin "a command refuses an option it does not take"
 for arguments in "start --bogus" "stop x" "logs -f" "consolidate --poll-seconds" "consolidate --poll-seconds 0" \
     "consolidate --poll-seconds x" "consolidate -RunImmediately" "reingest --limit" "reingest --limit -1" \
     "reingest --min-kb x" "reingest -Limit 1" "restore --file" "restore --database" "restore dump.sql" \
-    "restore -File x" "save-images x" "prove-data --force" "data status x" "data use a b" "data use --x" "data frob"; do
+    "restore -File x" "save-images x" "prove-data --force" "delete x" "data status x" "data use a b" "data use --x" "data frob"; do
     # shellcheck disable=SC2086 # split on purpose
     run_cli $arguments
     check "$arguments exits 1" status_is 1
@@ -876,6 +878,109 @@ for source in someone/hindsight-data@-oops someone/hindsight-data@ git@github.co
     check "'$source' exits 1" status_is 1
     check "'$source' says why" said "A data ref must not be empty or start with '-'"
 done
+finish
+
+## delete
+
+api_token=tskey-api-k123-SECRET456
+
+# delete_ready: a joined node, nOURS123CNTRL, in a tailnet that also has another node of the same
+# name, and a TS_API_TOKEN in config.env.
+delete_ready() {
+    local current profiles
+    mkdir -p "$stack/data/tailscale"
+    current=$(printf 'profile-ab12' | base64 | tr -d '\n')
+    profiles=$(printf '{"ab12":{"ID":"ab12","Key":"profile-ab12","NodeID":"nOURS123CNTRL"}}' | base64 | tr -d '\n')
+    printf '{"_current-profile":"%s","_profiles":"%s"}\n' "$current" "$profiles" >"$stack/data/tailscale/tailscaled.state"
+    set_state tailnet-devices "nOURS123CNTRL hindsight" "nOTHER45CNTRL hindsight"
+    sed -i 's/^HINDSIGHT_HOST=.*/HINDSIGHT_HOST=hindsight.tail-test.ts.net/' "$stack/config.env"
+    echo "TS_API_TOKEN=$api_token" >>"$stack/config.env"
+}
+
+device_left() { grep -q "^$1 " "$state/tailnet-devices"; }
+
+begin "delete stops the stack, removes the node by its ID, then data/tailscale"
+delete_ready
+set_state running hindsight-server hindsight-llama
+run_cli delete
+check "exits 0" status_is 0
+check "stops as stop does" said "Stopping everything..."
+check "removes the server" called "^rm -f hindsight-server$"
+check "downs the host-llama file" called "^compose -f docker-compose.hindsight-only.yml down$"
+check "the API call after the stop" called_before "^compose -f docker-compose.hindsight-only.yml down$" "^curl https://api.tailscale.com/"
+check "removes our node by its ID" called "^curl https://api.tailscale.com/api/v2/device/nOURS123CNTRL Authorization: Bearer $api_token$"
+check "our node is gone" not device_left nOURS123CNTRL
+check "says so, by the ts.net name" said "Removed hindsight.tail-test.ts.net from the tailnet."
+check "data/tailscale is gone" [ ! -e "$stack/data/tailscale" ]
+check "says it is deleted" said "Deleted. The volumes stay in Docker; remove this folder to finish."
+finish
+
+begin "delete leaves a node of the same name alone"
+delete_ready
+run_cli delete
+check "the other hindsight stays" device_left nOTHER45CNTRL
+check "one API call" [ "$(call_count "^curl https://api.tailscale.com/")" -eq 1 ]
+finish
+
+begin "delete never puts the token on a command line or in its output"
+delete_ready
+run_cli delete
+check "no credential on argv" not_called "CREDENTIAL ON ARGV"
+check "the fake would catch one" bash -c 'FAKE_DOCKER_DIR="$1" "$2/curl" -H "Authorization: Bearer x" https://api.tailscale.com/api/v2/device/n1 </dev/null >/dev/null; [ $? -eq 99 ]' _ "$state" "$fakes"
+check "the token is not in the output" not_said "$api_token"
+finish
+
+begin "delete without TS_API_TOKEN prints the manual step"
+delete_ready
+sed -i '/^TS_API_TOKEN=/d' "$stack/config.env"
+run_cli delete
+check "exits 0" status_is 0
+check "no API call" not_called "^curl https://api.tailscale.com/"
+check "says the node stays" said "No TS_API_TOKEN in config.env, so hindsight.tail-test.ts.net stays in the tailnet."
+check "names the Machines page and the node" said "Remove hindsight.tail-test.ts.net (node ID nOURS123CNTRL) on the Machines page: https://login.tailscale.com/admin/machines"
+check "data/tailscale is gone" [ ! -e "$stack/data/tailscale" ]
+finish
+
+begin "delete names TS_HOSTNAME, then hindsight, when start never wrote the ts.net name"
+delete_ready
+sed -i -e 's/^HINDSIGHT_HOST=.*/HINDSIGHT_HOST=/' -e '/^TS_API_TOKEN=/d' "$stack/config.env"
+run_cli delete
+check "names hindsight" said "Remove hindsight (node ID nOURS123CNTRL) on the Machines page"
+delete_ready
+sed -i -e 's/^HINDSIGHT_HOST=.*/HINDSIGHT_HOST=/' -e '/^TS_API_TOKEN=/d' "$stack/config.env"
+echo TS_HOSTNAME=memory >>"$stack/config.env"
+run_cli delete
+check "names TS_HOSTNAME" said "Remove memory (node ID nOURS123CNTRL) on the Machines page"
+finish
+
+begin "an API error removes nothing locally and says so"
+delete_ready
+set_state tailnet-status 500
+run_cli delete
+check "exits 1" status_is 1
+check "names the status" said "The Tailscale API answered HTTP 500, so hindsight.tail-test.ts.net was not removed."
+check "data/tailscale is kept" [ -f "$stack/data/tailscale/tailscaled.state" ]
+check "says it is kept" said "is kept, so delete can run again."
+check "never says deleted" not_said "Deleted."
+finish
+
+begin "a failed stop calls no API and keeps data/tailscale"
+delete_ready
+set_state down-exit-docker-compose.hindsight-only.yml 1
+run_cli delete
+check "exits 1" status_is 1
+check "says so" said "The stop failed, so the node stays in the tailnet."
+check "no API call" not_called "^curl https://api.tailscale.com/"
+check "data/tailscale is kept" [ -f "$stack/data/tailscale/tailscaled.state" ]
+finish
+
+begin "delete leaves config.env as it was, 0600 included"
+delete_ready
+cp "$stack/config.env" "$scratch/before.env"
+chmod 0600 "$stack/config.env"
+run_cli delete
+check "unchanged" cmp -s "$scratch/before.env" "$stack/config.env"
+if [ -z "${MSYSTEM:-}" ]; then check "still 0600" [ "$(stat -c %a "$stack/config.env")" = 600 ]; fi
 finish
 
 echo
