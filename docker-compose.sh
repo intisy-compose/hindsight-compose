@@ -19,9 +19,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
     cat <<'EOF'
-Usage: ./docker-compose.sh [consolidate|data|logs|prove-data|reingest|restore|save-images|start|stop]
+Usage: ./docker-compose.sh [consolidate|data|delete|logs|prove-data|reingest|restore|save-images|start|stop]
   consolidate  [--run-immediately] [--poll-seconds N] run one consolidation pass, then back to retain-only
   data         status | use [owner/repo[@ref]]  point data/ at a data repo (none = template)
+  delete       Stop, then remove the stack's node from the tailnet (with TS_API_TOKEN) and data/tailscale; for a stack being removed
   logs         Tail llama output
   prove-data   DESTRUCTIVE: delete the database volume and prove the self-restore brings every table back
   reingest     [--limit N] [--min-kb N] rebuild the memory bank from Claude Code transcripts
@@ -95,6 +96,21 @@ invoke_data() {
     esac
 }
 
+# invoke_delete: how the stack is deleted: stop, then its node leaves the tailnet and data/tailscale
+# goes, so a later start joins fresh. Removing the folder afterwards is the human's step. stack.sh is
+# sourced here only, since it turns off Git Bash's path conversion that the data commands need.
+invoke_delete() {
+    local node_name
+    # shellcheck source=scripts/stack.sh
+    . "$here/scripts/stack.sh"
+    # shellcheck source=gateway/tailnet-node.sh
+    . "$here/gateway/tailnet-node.sh"
+    bash "$here/scripts/hindsight.sh" stop || fail "The stop failed, so the node stays in the tailnet."
+    node_name=$(config_value HINDSIGHT_HOST "$(config_value TS_HOSTNAME hindsight)")
+    remove_tailnet_identity "$stack_root/data/tailscale" "$node_name" "$config_file" || exit 1
+    ok "Deleted. The volumes stay in Docker; remove this folder to finish."
+}
+
 cd "$here"
 command=$(printf '%s' "${1-start}" | tr '[:upper:]' '[:lower:]')
 [ $# -eq 0 ] || shift
@@ -106,5 +122,6 @@ case "$command" in
     save-images)         run_helper save-images "$@" ;;
     prove-data)          run_helper prove-data "$@" ;;
     data)                invoke_data "$@" ;;
+    delete)              no_options "$@"; invoke_delete ;;
     *)                   usage ;;
 esac

@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 Remove-Item Env:\COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
 
 . "$PSScriptRoot\scripts\config.ps1"
+. "$PSScriptRoot\gateway\tailnet-node.ps1"
 
 function Show-Usage([hashtable]$Commands) {
     $width = ($Commands.Keys | Measure-Object -Property Length -Maximum).Maximum
@@ -76,9 +77,32 @@ function Invoke-Data([object[]]$DataArguments) {
     }
 }
 
+<#
+.SYNOPSIS
+How the stack is deleted: stop, then its node leaves the tailnet and data\tailscale goes, so a later
+start joins fresh. Removing the folder afterwards is the human's step.
+.NOTES
+The stop runs without strict mode, as every helper does through Invoke-Helper, and its throw counts as
+a failed stop.
+#>
+function Invoke-Delete {
+    $configFile = "$PSScriptRoot\config.env"
+    Import-Config $configFile
+    Set-StrictMode -Off
+    $global:LASTEXITCODE = 0
+    try { & (Join-Path $PSScriptRoot "scripts\hindsight.ps1") stop; $stopped = $LASTEXITCODE -eq 0 }
+    catch { Write-Host "$_" -ForegroundColor Red; $stopped = $false }
+    Set-StrictMode -Version Latest
+    if (-not $stopped) { Write-Host "The stop failed, so the node stays in the tailnet." -ForegroundColor Red; exit 1 }
+    $nodeName = if ($env:HINDSIGHT_HOST) { $env:HINDSIGHT_HOST } elseif ($env:TS_HOSTNAME) { $env:TS_HOSTNAME } else { "hindsight" }
+    if (-not (Remove-TailnetIdentity (Join-Path $PSScriptRoot "data\tailscale") $nodeName $configFile)) { exit 1 }
+    Write-Host "  Deleted. The volumes stay in Docker; remove this folder to finish." -ForegroundColor Green
+}
+
 $usage = @{
     "start"       = "Start the full stack (default)"
     "stop"        = "Stop everything"
+    "delete"      = "Stop, then remove the stack's node from the tailnet (with TS_API_TOKEN) and data\tailscale; for a stack being removed"
     "logs"        = "Tail llama output"
     "consolidate" = "[-RunImmediately] run one consolidation pass, then back to retain-only"
     "reingest"    = "[-Limit N] [-MinKB N] rebuild the memory bank from Claude Code transcripts"
@@ -97,5 +121,6 @@ switch ($Command.ToLower()) {
     }
     { $_ -in $helpers } { Invoke-Helper $Command.ToLower() $forwarded }
     "data" { Invoke-Data $forwarded; break }
+    "delete" { Invoke-Delete; break }
     default { Show-Usage -Commands $usage; exit 1 }
 }
