@@ -3,6 +3,7 @@ param([string]$Command = "start")
 
 
 . "$PSScriptRoot\llama-lib.ps1"
+. "$PSScriptRoot\backup-sidecar.ps1"
 
 function Write-Step([string]$msg) { Write-Host $msg -ForegroundColor Cyan }
 function Write-OK([string]$msg)   { Write-Host "  $msg" -ForegroundColor Green }
@@ -221,6 +222,7 @@ function Start-Stack {
         Write-Step "[5] Starting Hindsight container..."
         Invoke-DockerCompose -f "$Root\docker-compose.hindsight-only.yml" pull hindsight
         Invoke-DockerCompose -f "$Root\docker-compose.hindsight-only.yml" up -d --remove-orphans
+        $composeFile = "docker-compose.hindsight-only.yml"
 
     } else {
         $cf = Get-DockerComposeFile
@@ -255,7 +257,12 @@ function Start-Stack {
         Invoke-DockerCompose -f "$Root\$cf" up -d --remove-orphans
         Write-Step "[6] Waiting for llama to be healthy (slow first model load)..."
         Wait-LlamaHealthy
+        $composeFile = $cf
     }
+
+    Write-Step "[7] Waiting for Hindsight, then for its backup sidecar..."
+    Wait-HindsightHealthy -Tries 300 -Message "Hindsight did not answer on $script:HindsightHealthUrl within 900s."
+    Confirm-BackupSidecarJoined "$Root\$composeFile"
 
     Write-Host ""
     Write-Host "Stack is up." -ForegroundColor Green

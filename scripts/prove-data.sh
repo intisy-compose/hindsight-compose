@@ -7,9 +7,12 @@
 # The stack must be running (hindsight-server and hindsight-db-backup), because the counts come from
 # the embedded Postgres. The restore itself is the db-backup sidecar's restore_if_empty, which reads
 # the newest dump from data/hindsight; a fresh dump is always written right before the "before" count,
-# so writes after an older dump cannot look like a failed restore. The wait ends when
+# so writes after an older dump cannot look like a failed restore. For the whole run hindsight runs with
+# HINDSIGHT_WRITERS=false (no worker, no audit log, no LLM trace), so consolidation and retains do not
+# change the tables between the counts; they are back on at the end, failed or not. The wait ends when
 # public.memory_units is non-empty. public.async_operations is printed but not compared, because the
-# worker rewrites it after a restore (processing back to pending).
+# restore rewrites it (processing back to pending) and a retain request still queues into it while the
+# worker is off.
 set -euo pipefail
 scripts=$(dirname "$0")
 # shellcheck source=scripts/stack.sh
@@ -25,7 +28,8 @@ unset COMPOSE_PROJECT_NAME
 dump_folder="$stack_root/data/hindsight"
 pg0_volume="hindsight-compose_hindsight-pg0"
 uncompared_tables=(public.async_operations)
-restore_timeout_seconds=$((15 * 60))
+restore_timeout_seconds=$((60 * 60))
+writers_paused_tries=300
 memory_table="public.memory_units"
 
 # hindsight_table_counts: "schema.table|count" lines, read through the db-backup sidecar's psql, which
@@ -94,10 +98,35 @@ write_uncompared_counts() {
     done
 }
 
+# set_writers true|false: recreates hindsight with its worker, audit log and LLM trace on or off.
+set_writers() {
+    if [ "$1" = false ]; then export HINDSIGHT_WRITERS=false; else unset HINDSIGHT_WRITERS; fi
+    restart_hindsight "$compose_file" "$writers_paused_tries"
+}
+
+# resume_writers: the EXIT trap once the writers are paused, so a failed run never leaves the stack
+# without its worker. When it fails itself the run fails, whatever it found.
+resume_writers() {
+    local run_exit=$?
+    trap - EXIT
+    step "Resuming hindsight's writers ..."
+    if ! (set_writers true); then
+        err "Run './docker-compose.sh start' to bring the stack back with its writers."
+        [ "$run_exit" -ne 0 ] || run_exit=1
+    fi
+    exit "$run_exit"
+}
+
 for container in "$server_container" "$backup_container"; do
     container_is_running "$container" ||
         fail "$container is not running; start the stack first (both $server_container and $backup_container must be up)"
 done
+compose_file=$(gpu_compose_file)
+[ -n "$compose_file" ] || fail "No supported GPU found (need NVIDIA via nvidia-smi), so the stack's compose file is unknown."
+
+trap resume_writers EXIT
+step "Pausing hindsight's writers (worker, audit log, LLM trace) for the run ..."
+set_writers false
 
 step "Writing a fresh dump ..."
 write_fresh_dump
