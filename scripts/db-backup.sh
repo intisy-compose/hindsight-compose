@@ -1,7 +1,8 @@
 #!/bin/sh
-# db-backup.sh run: the db-backup sidecar's program, run by its busybox sh. It restores the newest dump
-# into an empty database, then dumps every quarter-hour into $backups and prunes the dumps. Sourced
-# without "run", it only defines the functions, which is how the tests call them.
+# db-backup.sh run | dump: the db-backup sidecar's program, run by its busybox sh. "run" restores the
+# newest dump into an empty database, then dumps every quarter-hour into $backups and prunes the dumps;
+# "dump" writes one dump and prints its name, which is how prove-data dumps. Sourced without either,
+# it only defines the functions, which is how the tests call them.
 
 backups=${BACKUPS:-/backups}
 # A dump writes all the time, so a .tmp unchanged this long is left by a crash, whoever wrote it.
@@ -69,20 +70,30 @@ restore_if_empty() {
   if [ "$cnt" = "0" ] && [ -n "$latest" ]; then
     echo "[restore] empty DB + backup present -> restoring $latest"
     psql -h 127.0.0.1 -U hindsight -d hindsight -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='hindsight' AND pid <> pg_backend_pid()" >/dev/null 2>&1
-    psql -h 127.0.0.1 -U hindsight -d hindsight --single-transaction -f "$latest" > "$backups/last-restore.log" 2>&1
+    dd if="$latest" bs=1M 2>/dev/null | psql -h 127.0.0.1 -U hindsight -d hindsight --single-transaction -f - > "$backups/last-restore.log" 2>&1
     psql -h 127.0.0.1 -U hindsight -d hindsight -c "UPDATE async_operations SET status='pending', worker_id=NULL, claimed_at=NULL WHERE status='processing' AND task_payload IS NOT NULL" >> "$backups/last-restore.log" 2>&1
     echo "[restore] complete"
   fi
 }
 
+dump_to() {
+  # shellcheck disable=SC3040 # busybox ash, the sidecar's sh, has pipefail
+  (set -o pipefail; pg_dump -h 127.0.0.1 -U hindsight -d hindsight --no-owner --clean --if-exists 2> "$backups/last-error.log" | dd obs=1M of="$1" 2>/dev/null)
+}
+
+# dump_once: one dump, named hindsight-<UTC timestamp>.sql only once complete. musl's stdio moves
+# 1 KiB per call, which crawls over Docker Desktop's file sharing, so dd writes 1 MiB blocks (and the
+# restore above reads them).
 dump_once() {
   ts=$(date +%Y%m%d-%H%M%S)
-  if pg_dump -h 127.0.0.1 -U hindsight -d hindsight --no-owner --clean --if-exists > "$backups/hindsight-$ts.sql.tmp" 2> "$backups/last-error.log"; then
+  if dump_to "$backups/hindsight-$ts.sql.tmp"; then
     mv "$backups/hindsight-$ts.sql.tmp" "$backups/hindsight-$ts.sql"
     log "created hindsight-$ts.sql"
+    echo "hindsight-$ts.sql"
   else
     rm -f "$backups/hindsight-$ts.sql.tmp"
     log "FAILED hindsight-$ts.sql"
+    return 1
   fi
 }
 
@@ -93,10 +104,13 @@ run() {
   while true; do
     # Align to the next wall-clock quarter-hour (:00 :15 :30 :45) instead of drifting.
     now=$(date +%s); sleep $(( 900 - (now % 900) ))
-    dump_once
+    dump_once >/dev/null || true
     prune
     reap
   done
 }
 
-if [ "${1:-}" = run ]; then run; fi
+case "${1:-}" in
+  run) run ;;
+  dump) dump_once ;;
+esac

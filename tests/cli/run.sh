@@ -801,12 +801,12 @@ counts_lines 0 0 >"$state/counts-2"
 counts_lines 9 7 >"$state/counts"
 run_cli prove-data
 check "exits 0" status_is 0
-check "pauses the writers before the dump" called_before "^compose -f docker-compose.nvidia.yml up -d hindsight$" "^exec hindsight-db-backup sh -c .*pg_dump"
+check "pauses the writers before the dump" called_before "^compose -f docker-compose.nvidia.yml up -d hindsight$" "^exec hindsight-db-backup sh /usr/local/bin/db-backup.sh dump$"
 check "writers off for the run, back on after it" [ "$(tr '\n' ' ' <"$state/writers")" = "false false unset " ]
 check "rejoins the sidecar after each recreate of hindsight" [ "$(call_count "^compose -f docker-compose.nvidia.yml up -d --force-recreate --no-deps db-backup$")" -eq 2 ]
 check "says it pauses them" said "Pausing hindsight's writers (worker, audit log, LLM trace) for the run ..."
 check "says it resumes them" said "Resuming hindsight's writers ..."
-check "dumps first" called_before "^exec hindsight-db-backup sh -c .*pg_dump" "^exec hindsight-db-backup psql"
+check "dumps first" called_before "^exec hindsight-db-backup sh /usr/local/bin/db-backup.sh dump$" "^exec hindsight-db-backup psql"
 check "names the dump" said "dump hindsight-20261104-120000.sql"
 check "counts through the sidecar" called "^exec hindsight-db-backup psql -h 127.0.0.1 -U hindsight -d hindsight -At -F \| -c "
 check "before" said "3 tables, public.memory_units = 7"
@@ -872,7 +872,7 @@ set_state hindsight-health 000
 run_cli prove-data
 check "exits 1" status_is 1
 check "says so" said "Hindsight did not become healthy after restart."
-check "no dump" not_called "pg_dump"
+check "no dump" not_called "db-backup.sh dump"
 check "no volume removed" not_called "^volume rm"
 finish
 
@@ -930,10 +930,9 @@ finish
 begin "the sidecar's prune keeps a .tmp a dump still holds open, however old its last write"
 dump_file="$stack/data/hindsight/hindsight-20261105-045146.sql.tmp"
 write_dump "${dump_file##*/}" truncated
-(exec 3>>"$dump_file"; "$REAL_SLEEP" 20) &
+"$REAL_SLEEP" 20 3>>"$dump_file" &
 writer=$!
-wait_for [ -e "/proc/$writer" ]
-"$REAL_SLEEP" 0.5
+wait_for [ -e "/proc/$writer/fd/3" ]
 touch -d '30 minutes ago' "$dump_file"
 prune_dumps
 check "kept" [ -e "$dump_file" ]
@@ -947,6 +946,37 @@ write_dump hindsight-20261105-050001.sql.tmp truncated
 touch -d '9 minutes ago' "$stack/data/hindsight/hindsight-20261105-050001.sql.tmp"
 prune_dumps
 check "kept" [ -e "$stack/data/hindsight/hindsight-20261105-050001.sql.tmp" ]
+finish
+
+none_match() { ! compgen -G "$1" >/dev/null; }
+
+# sidecar_dump [PG_DUMP_EXIT]: the sidecar's "dump" over the scratch stack's data/hindsight, with a
+# pg_dump that prints a dump and exits PG_DUMP_EXIT (default 0).
+sidecar_dump() {
+    mkdir -p "$scratch/sidecar-bin"
+    printf '%s\n' '#!/bin/sh' 'printf "%s\n" "-- PostgreSQL database dump" "COPY public.memory_units (id) FROM stdin;" "1" "-- PostgreSQL database dump complete"' "exit ${1:-0}" >"$scratch/sidecar-bin/pg_dump"
+    chmod +x "$scratch/sidecar-bin/pg_dump"
+    output=$(PATH="$scratch/sidecar-bin:$PATH" BACKUPS="$stack/data/hindsight" sh "$stack/scripts/db-backup.sh" dump 2>&1)
+    status=$?
+}
+
+begin "the sidecar's dump writes a complete dump under its final name and prints it"
+sidecar_dump
+check "exits 0" status_is 0
+dump_name=$(cd "$stack/data/hindsight" && compgen -G 'hindsight-*.sql')
+check "one dump" [ -n "$dump_name" ]
+check "prints its name" [ "$output" = "$dump_name" ]
+check "the whole dump" grep -qx -- "-- PostgreSQL database dump complete" "$stack/data/hindsight/$dump_name"
+check "no .tmp left" none_match "$stack/data/hindsight/*.tmp"
+check "logged" grep -q "created $dump_name$" "$stack/data/hindsight/backup.log"
+finish
+
+begin "the sidecar's dump fails, and leaves no dump, when pg_dump fails behind its writer"
+sidecar_dump 1
+check "exits non-zero" not status_is 0
+check "no dump" none_match "$stack/data/hindsight/hindsight-*.sql"
+check "no .tmp" none_match "$stack/data/hindsight/*.tmp"
+check "logged" grep -q "FAILED hindsight-" "$stack/data/hindsight/backup.log"
 finish
 
 begin "the sidecar runs the program the compose file mounts"

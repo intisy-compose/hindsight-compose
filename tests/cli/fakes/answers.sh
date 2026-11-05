@@ -87,7 +87,7 @@ answer() {
         "exec -e PGPASSWORD hindsight-server sh -c "*) answer_psql_restore ;;
         "exec -u root hindsight-server rm -f "*) return "$(state_value cleanup-exit 0)" ;;
         "exec -i hindsight-server python3 -") cat >/dev/null; echo "reset stale consolidation: UPDATE 0" ;;
-        "exec hindsight-db-backup sh -c "*) return "$(state_value fresh-dump-exit 0)" ;;
+        "exec hindsight-db-backup sh /usr/local/bin/db-backup.sh dump") return "$(state_value fresh-dump-exit 0)" ;;
         "exec hindsight-db-backup psql "*) answer_counts ;;
         "exec hindsight-db-backup pg_isready "*) return "$(state_value pg-isready-exit 0)" ;;
         "volume rm "*) return "$(state_value volume-rm-exit 0)" ;;

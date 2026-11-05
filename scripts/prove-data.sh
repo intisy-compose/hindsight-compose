@@ -54,9 +54,7 @@ write_recovery_hint() {
 }
 
 write_fresh_dump() {
-    # shellcheck disable=SC2016 # the sidecar's shell expands it
-    docker exec "$backup_container" sh -c 'timestamp=$(date +%Y%m%d-%H%M%S); pg_dump -h 127.0.0.1 -U hindsight -d hindsight --no-owner --clean --if-exists > /backups/hindsight-$timestamp.sql.tmp && mv /backups/hindsight-$timestamp.sql.tmp /backups/hindsight-$timestamp.sql' ||
-        fail "the fresh dump failed"
+    docker exec "$backup_container" sh /usr/local/bin/db-backup.sh dump >/dev/null || fail "the fresh dump failed"
 }
 
 # wait_for_restore: until memory_units holds rows, at most restore_timeout_seconds.
