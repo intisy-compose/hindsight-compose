@@ -86,3 +86,43 @@ is_count() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge "${2:-0}" ]; }
 
 # http_status URL [SECONDS]: the HTTP status URL answers with, 000 when it does not answer.
 http_status() { curl -s -o /dev/null -m "${2:-3}" -w '%{http_code}' "$1" 2>/dev/null || true; }
+
+# The db-backup sidecar lives in hindsight's network namespace, which every start of hindsight
+# replaces, and hindsight's first start on a new volume or after a recreate can fail on its own
+# database and be restarted by Docker. A sidecar joined to the old namespace makes no dump and no
+# self-restore, so it is rejoined only once hindsight answers. The twin of scripts/backup-sidecar.ps1.
+health_url="http://localhost:8888/health"
+
+# wait_for_hindsight TRIES: until hindsight's /health answers 200, asked every 3 s, at most TRIES times.
+wait_for_hindsight() {
+    for _ in $(seq "$1"); do
+        [ "$(http_status "$health_url")" != 200 ] || return 0
+        sleep 3
+    done
+    return 1
+}
+
+sidecar_reaches_database() {
+    docker exec "$backup_container" pg_isready -h 127.0.0.1 -U hindsight -d hindsight -t 5 >/dev/null 2>&1
+}
+
+# rejoin_backup_sidecar FILE: recreates db-backup from FILE in hindsight's current namespace.
+rejoin_backup_sidecar() {
+    compose_with "$1" up -d --force-recreate --no-deps db-backup >/dev/null 2>&1 ||
+        fail "The backup sidecar could not be recreated; run './docker-compose.sh start' to bring it back."
+}
+
+# confirm_backup_sidecar_joined FILE: a sidecar that reaches pg0 is left alone, because it may be
+# restoring a dump into an empty volume.
+confirm_backup_sidecar_joined() {
+    if sidecar_reaches_database; then ok "The backup sidecar reaches the database."; return 0; fi
+    info "The backup sidecar does not reach the database; rejoining it..."
+    rejoin_backup_sidecar "$1"
+}
+
+# restart_hindsight FILE [TRIES]: recreates hindsight from FILE, waits for it, then rejoins db-backup.
+restart_hindsight() {
+    compose_with "$1" up -d hindsight >/dev/null 2>&1 || true
+    wait_for_hindsight "${2:-40}" || fail "Hindsight did not become healthy after restart."
+    rejoin_backup_sidecar "$1"
+}

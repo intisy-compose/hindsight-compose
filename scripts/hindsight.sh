@@ -179,6 +179,9 @@ start_stack() {
     run_compose "$file" up -d --remove-orphans
     step "[6] Waiting for llama to be healthy (slow first model load)..."
     wait_llama_healthy
+    step "[7] Waiting for Hindsight, then for its backup sidecar..."
+    wait_for_hindsight 300 || fail "Hindsight did not answer on $health_url within 900s."
+    confirm_backup_sidecar_joined "$file"
 
     echo
     printf '\033[32m%s\033[0m\n' "Stack is up."

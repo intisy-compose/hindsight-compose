@@ -10,8 +10,9 @@
 #   psql-output      what the restoring psql prints (default two COPY lines)
 #   psql-hold        present: the restoring psql waits for release (see hold_psql)
 #   up-exit, pull-exit, down-exit-<compose file>, load-exit, cp-exit, psql-exit, cleanup-exit,
-#   fresh-dump-exit, volume-rm-exit, counts-exit-N: exit codes (default 0)
-# A compose `up -d hindsight` appends its HINDSIGHT_CONSOLIDATION_SLOTS to slots; a psql exec notes in
+#   fresh-dump-exit, volume-rm-exit, counts-exit-N, pg-isready-exit: exit codes (default 0)
+# A compose `up -d hindsight` appends its HINDSIGHT_CONSOLIDATION_SLOTS to slots; every compose up of
+# hindsight, alone or with the stack, appends its HINDSIGHT_WRITERS to writers; a psql exec notes in
 # pgpassword whether PGPASSWORD reached it through the environment.
 
 state_value() { cat "$state/$1" 2>/dev/null || echo "${2:-}"; }
@@ -72,8 +73,12 @@ answer() {
         "image ls --format "*) [ "$(state_value images-present yes)" = no ] || echo "ghcr.io/vectorize-io/hindsight:0.8.2" ;;
         "compose -f "*" exec -T tailscale "*) answer_tailnet_status ;;
         "compose -f "*" config --images") answer_images "$3" ;;
-        "compose -f "*" up -d --remove-orphans") return "$(state_value up-exit 0)" ;;
-        "compose -f "*" up -d hindsight") echo "${HINDSIGHT_CONSOLIDATION_SLOTS-unset}" >>"$state/slots" ;;
+        "compose -f "*" up -d --remove-orphans")
+            echo "${HINDSIGHT_WRITERS-unset}" >>"$state/writers"
+            return "$(state_value up-exit 0)" ;;
+        "compose -f "*" up -d hindsight")
+            echo "${HINDSIGHT_CONSOLIDATION_SLOTS-unset}" >>"$state/slots"
+            echo "${HINDSIGHT_WRITERS-unset}" >>"$state/writers" ;;
         "compose -f "*" pull") return "$(state_value pull-exit 0)" ;;
         "compose -f "*" down") return "$(state_value "down-exit-$3" 0)" ;;
         "load -i "*) return "$(state_value load-exit 0)" ;;
@@ -84,6 +89,7 @@ answer() {
         "exec -i hindsight-server python3 -") cat >/dev/null; echo "reset stale consolidation: UPDATE 0" ;;
         "exec hindsight-db-backup sh -c "*) return "$(state_value fresh-dump-exit 0)" ;;
         "exec hindsight-db-backup psql "*) answer_counts ;;
+        "exec hindsight-db-backup pg_isready "*) return "$(state_value pg-isready-exit 0)" ;;
         "volume rm "*) return "$(state_value volume-rm-exit 0)" ;;
         *) return 0 ;;
     esac

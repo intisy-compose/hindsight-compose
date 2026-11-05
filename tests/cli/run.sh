@@ -423,6 +423,35 @@ check "exits 1" status_is 1
 check "names the call" said "docker compose -f docker-compose.nvidia.yml up -d --remove-orphans exited with 17"
 finish
 
+begin "start rejoins a backup sidecar left in a dead namespace, once hindsight answers"
+set_state pg-isready-exit 2
+run_cli start
+check "exits 0" status_is 0
+check "asks the sidecar for pg0" called "^exec hindsight-db-backup pg_isready -h 127.0.0.1 -U hindsight -d hindsight -t 5$"
+check "rejoins it" called "^compose -f docker-compose.nvidia.yml up -d --force-recreate --no-deps db-backup$"
+check "after the stack is up" called_before "up -d --remove-orphans$" "--force-recreate --no-deps db-backup$"
+check "only once hindsight answers" called_before ":8888/health$" "--force-recreate --no-deps db-backup$"
+check "says so" said "The backup sidecar does not reach the database; rejoining it..."
+check "says it is up" said "Stack is up."
+finish
+
+begin "start leaves a backup sidecar that reaches the database alone, as it may be restoring"
+run_cli start
+check "exits 0" status_is 0
+check "asks it" called "^exec hindsight-db-backup pg_isready "
+check "never recreates it" not_called "db-backup$"
+finish
+
+begin "start fails when hindsight never answers, and never joins the sidecar"
+set_state hindsight-health 000
+run_cli start
+check "exits 1" status_is 1
+check "says so" said "Hindsight did not answer on http://localhost:8888/health within 900s."
+check "asked 300 times" [ "$(call_count "^curl .*8888/health$")" -eq 300 ]
+check "no sidecar call" not_called "db-backup"
+check "not up" not_said "Stack is up."
+finish
+
 ## stop and logs
 
 begin "stop removes the containers and downs both compose files"
@@ -772,6 +801,11 @@ counts_lines 0 0 >"$state/counts-2"
 counts_lines 9 7 >"$state/counts"
 run_cli prove-data
 check "exits 0" status_is 0
+check "pauses the writers before the dump" called_before "^compose -f docker-compose.nvidia.yml up -d hindsight$" "^exec hindsight-db-backup sh -c .*pg_dump"
+check "writers off for the run, back on after it" [ "$(tr '\n' ' ' <"$state/writers")" = "false false unset " ]
+check "rejoins the sidecar after each recreate of hindsight" [ "$(call_count "^compose -f docker-compose.nvidia.yml up -d --force-recreate --no-deps db-backup$")" -eq 2 ]
+check "says it pauses them" said "Pausing hindsight's writers (worker, audit log, LLM trace) for the run ..."
+check "says it resumes them" said "Resuming hindsight's writers ..."
 check "dumps first" called_before "^exec hindsight-db-backup sh -c .*pg_dump" "^exec hindsight-db-backup psql"
 check "names the dump" said "dump hindsight-20261104-120000.sql"
 check "counts through the sidecar" called "^exec hindsight-db-backup psql -h 127.0.0.1 -U hindsight -d hindsight -At -F \| -c "
@@ -795,16 +829,51 @@ check "the missing table" said "DIFFERS public.banks before=2 after=missing"
 check "the hint" said "hindsight-compose_hindsight-pg0 was deleted. Recover with: ./docker-compose.sh start   then, if public.memory_units stays empty,   ./docker-compose.sh restore --file data/hindsight/hindsight-20261104-120000.sql"
 finish
 
-begin "prove-data gives up after 15 minutes of an empty memory_units"
+begin "prove-data gives up after 60 minutes of an empty memory_units, and still resumes the writers"
 set_state running hindsight-server hindsight-db-backup
 write_dump hindsight-20261104-120000.sql
 counts_lines 3 7 >"$state/counts-1"
 counts_lines 0 0 >"$state/counts"
 run_cli prove-data
 check "exits 1" status_is 1
-check "says so" said "public.memory_units stayed empty for 15 minutes"
+check "says so" said "public.memory_units stayed empty for 60 minutes"
 check "the hint" said "was deleted. Recover with:"
-check "60 waits" [ "$(cat "$state/count-calls")" -eq 61 ]
+check "240 waits" [ "$(cat "$state/count-calls")" -eq 241 ]
+check "writers back on" [ "$(tail -n 1 "$state/writers")" = unset ]
+finish
+
+begin "prove-data compares every table but async_operations, the audit log and LLM trace included"
+set_state running hindsight-server hindsight-db-backup
+write_dump hindsight-20261104-120000.sql
+printf '%s\n' "public.async_operations|3" "public.audit_log|40" "public.llm_requests|9" "public.memory_units|7" "public.observation_history|4" >"$state/counts-1"
+printf '%s\n' "public.async_operations|5" "public.audit_log|41" "public.llm_requests|10" "public.memory_units|7" "public.observation_history|5" >"$state/counts"
+run_cli prove-data
+check "exits 1" status_is 1
+check "audit_log" said "DIFFERS public.audit_log before=40 after=41"
+check "llm_requests" said "DIFFERS public.llm_requests before=9 after=10"
+check "observation_history" said "DIFFERS public.observation_history before=4 after=5"
+check "async_operations is not" not_said "DIFFERS public.async_operations"
+finish
+
+begin "prove-data resumes the writers when the fresh dump fails"
+set_state running hindsight-server hindsight-db-backup
+set_state fresh-dump-exit 1
+run_cli prove-data
+check "exits 1" status_is 1
+check "says the dump failed" said "the fresh dump failed"
+check "writers off, then back on" [ "$(tr '\n' ' ' <"$state/writers")" = "false unset " ]
+check "says it resumes them" said "Resuming hindsight's writers ..."
+check "no volume removed" not_called "^volume rm"
+finish
+
+begin "prove-data deletes nothing when hindsight does not come back with its writers paused"
+set_state running hindsight-server hindsight-db-backup
+set_state hindsight-health 000
+run_cli prove-data
+check "exits 1" status_is 1
+check "says so" said "Hindsight did not become healthy after restart."
+check "no dump" not_called "pg_dump"
+check "no volume removed" not_called "^volume rm"
 finish
 
 begin "prove-data deletes nothing when no table is counted"
@@ -841,6 +910,49 @@ run_cli prove-data
 check "exits 1" status_is 1
 check "says so" said "could not remove hindsight-compose_hindsight-pg0"
 check "no start" not_called "up -d --remove-orphans$"
+finish
+
+## the backup sidecar
+
+# prune_dumps: the sidecar's prune over the scratch stack's data/hindsight.
+prune_dumps() {
+    (cd "$stack/data/hindsight" && BACKUPS="$stack/data/hindsight" sh -c '. "$1"; prune' sh "$stack/scripts/db-backup.sh")
+}
+
+begin "the sidecar's prune deletes a .tmp a crash left, and says so"
+write_dump hindsight-20261105-040000.sql.tmp truncated
+touch -d '30 minutes ago' "$stack/data/hindsight/hindsight-20261105-040000.sql.tmp"
+prune_dumps
+check "deleted" [ ! -e "$stack/data/hindsight/hindsight-20261105-040000.sql.tmp" ]
+check "logged" grep -q "deleted stale hindsight-20261105-040000.sql.tmp$" "$stack/data/hindsight/backup.log"
+finish
+
+begin "the sidecar's prune keeps a .tmp a dump still holds open, however old its last write"
+dump_file="$stack/data/hindsight/hindsight-20261105-045146.sql.tmp"
+write_dump "${dump_file##*/}" truncated
+(exec 3>>"$dump_file"; "$REAL_SLEEP" 20) &
+writer=$!
+wait_for [ -e "/proc/$writer" ]
+"$REAL_SLEEP" 0.5
+touch -d '30 minutes ago' "$dump_file"
+prune_dumps
+check "kept" [ -e "$dump_file" ]
+check "nothing logged" [ ! -s "$stack/data/hindsight/backup.log" ]
+kill "$writer" 2>/dev/null
+wait "$writer" 2>/dev/null
+finish
+
+begin "the sidecar's prune keeps a .tmp written in the last 10 minutes by a writer it cannot see"
+write_dump hindsight-20261105-050001.sql.tmp truncated
+touch -d '9 minutes ago' "$stack/data/hindsight/hindsight-20261105-050001.sql.tmp"
+prune_dumps
+check "kept" [ -e "$stack/data/hindsight/hindsight-20261105-050001.sql.tmp" ]
+finish
+
+begin "the sidecar runs the program the compose file mounts"
+check "mounted read-only" grep -qF -- '- "./scripts/db-backup.sh:/usr/local/bin/db-backup.sh:ro"' "$stack/docker-compose.base.yml"
+check "run by it" grep -qF -- 'entrypoint: ["sh", "/usr/local/bin/db-backup.sh", "run"]' "$stack/docker-compose.base.yml"
+check "LF endings" no_cr "$stack/scripts/db-backup.sh"
 finish
 
 ## data

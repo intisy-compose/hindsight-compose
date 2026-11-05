@@ -83,7 +83,16 @@ the newest `hindsight-YYYYMMDD-HHMMSS.sql` that passes.
 
 The database restores itself: when the pg0 volume comes up empty, the `db-backup` sidecar restores
 the newest dump in `data/hindsight` before anything else uses it, so neither CLI takes a restore
-decision. `prove-data` deletes the volume and proves that.
+decision. The sidecar runs `scripts/db-backup.sh` (its own program, not a CLI helper): a dump every
+quarter-hour, then a prune that keeps a tiered set and deletes a `.tmp` only when no process holds it
+open and it has not changed for 10 minutes, so a crash's leftover goes and a dump being written stays.
+The sidecar shares hindsight's network namespace, so `start` rejoins it once hindsight answers when it
+no longer reaches the database (hindsight restarting on its first boot strands it).
+
+`prove-data` deletes the volume and proves that. For the whole run it recreates hindsight with
+`HINDSIGHT_WRITERS=false` (no worker, audit log or LLM trace), so consolidation cannot change the
+counts, and turns them back on at the end, failed or not; a retain sent meanwhile waits in
+`async_operations`, the one table it does not compare.
 
 `data/` is its own git repo (a submodule), defaulting to the public
 [`hindsight-data-template`](https://github.com/intisy-compose/hindsight-data-template). Point it at

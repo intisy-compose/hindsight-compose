@@ -10,7 +10,6 @@ set -euo pipefail
 
 usage_line="Usage: ./docker-compose.sh consolidate [--run-immediately] [--poll-seconds N]"
 operations_url="http://localhost:8888/v1/default/banks/claude_code/operations"
-health_url="http://localhost:8888/health"
 run_immediately=false
 poll_seconds=30
 
@@ -47,25 +46,7 @@ consolidations = sum(1 for o in operations if o.get("task_type") == "consolidati
 print(retains, consolidations)' <<<"$listing" | tr -d '\r'
 }
 
-# restart_hindsight SLOTS: recreates hindsight with SLOTS consolidation worker slots and waits for it.
-# db-backup lives in hindsight's network namespace, which every start of hindsight replaces, and
-# hindsight's first start after a recreate can fail on its own database and be restarted by Docker. So
-# the sidecar is recreated only once hindsight answers; joined earlier, every dump fails until the next
-# stack start.
-restart_hindsight() {
-    HINDSIGHT_CONSOLIDATION_SLOTS=$1 compose_with "$compose_file" up -d hindsight >/dev/null 2>&1 || true
-    wait_for_hindsight
-    compose_with "$compose_file" up -d --force-recreate --no-deps db-backup >/dev/null 2>&1 ||
-        fail "The backup sidecar could not be recreated; run './docker-compose.sh start' to bring it back."
-}
-
-wait_for_hindsight() {
-    for _ in $(seq 40); do
-        [ "$(http_status "$health_url")" != 200 ] || return 0
-        sleep 3
-    done
-    fail "Hindsight did not become healthy after restart."
-}
+restart_with_slots() { HINDSIGHT_CONSOLIDATION_SLOTS=$1 restart_hindsight "$compose_file"; }
 
 # Free any consolidation op a previous (now-gone) worker left in 'processing'.
 reset_stale_consolidation() {
@@ -109,11 +90,11 @@ consolidate_to_completion() {
 $run_immediately || wait_for_retains
 
 step "Enabling consolidation (dedicated pass)..."
-restart_hindsight 1
+restart_with_slots 1
 reset_stale_consolidation
 
 consolidate_to_completion
 
 step "Consolidation complete -returning to retain-only mode..."
-restart_hindsight 0
+restart_with_slots 0
 ok "Done. Consolidation cleared; retains have the GPU again."
