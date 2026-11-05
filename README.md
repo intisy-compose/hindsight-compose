@@ -49,6 +49,23 @@ llama-server (`DOCKER_LLAMA=false`, with its JSON-repair proxy and the watcher t
 `hindsight-llama` container) and the Vulkan image over `/dev/dxg` are the Windows CLI's alone, so
 Linux starts no process on the host.
 
+## Deleting the stack
+
+`stop` keeps the node in the tailnet, so the next `start` comes back under the same name. To remove
+the stack for good, run `.\docker-compose.ps1 delete` (or `./docker-compose.sh delete`), then remove
+the folder. `delete` runs `stop` (the native llama, its proxy and watcher included), removes the node
+from the tailnet, and removes `data/tailscale`, so a later `start` joins fresh. It finds the node by
+the stable node ID in `data/tailscale/tailscaled.state`, never by its name, so another device named
+`hindsight` stays.
+
+The removal goes through the Tailscale API with `TS_API_TOKEN` from `config.env`: an access token
+from [Settings, Keys](https://login.tailscale.com/admin/settings/keys) of an account that may remove
+devices (Owner, Admin or IT admin). Without one, `delete` prints the node's name and ID to remove on
+the [Machines page](https://login.tailscale.com/admin/machines) instead. When the API refuses or
+does not answer, `data/tailscale` stays and `delete` can run again. When `stop` fails, nothing is
+removed. The volumes stay in Docker until `docker volume rm` removes them; the database is also in
+the dumps under `data/`.
+
 ## Configuration
 
 `config.env` (gitignored; copy from `config.env.example`) selects the model
